@@ -141,9 +141,9 @@ function parseMonthPeriod(period?: string): string | undefined {
 
 function zenMoneySetupHint(): string {
 	return [
-		"ZenMoney access is not configured.",
+		"ZenMoney token is not configured.",
 		"",
-		"Set `ZENMONEY_ACCESS_TOKEN` (or `ZENMONEY_TOKEN`) before starting Pi.",
+		"Set `ZENMONEY_TOKEN` before starting Pi.",
 		"The value may be a raw token, an `op://` 1Password reference, or a literal `op read ...` / `$(op read ...)` string.",
 		"Then use `/zen-accounts` to discover selectable accounts by id, title, or syncID.",
 		"",
@@ -151,10 +151,10 @@ function zenMoneySetupHint(): string {
 	].join("\n");
 }
 
-async function getZenMoneyAccessToken(): Promise<string | undefined> {
-	const raw = process.env.ZENMONEY_ACCESS_TOKEN?.trim() || process.env.ZENMONEY_TOKEN?.trim();
+async function getZenMoneyToken(): Promise<string | undefined> {
+	const raw = process.env.ZENMONEY_TOKEN?.trim();
 	if (!raw) return undefined;
-	return resolveSecretReference(raw, "ZenMoney access token");
+	return resolveSecretReference(raw, "ZenMoney token");
 }
 
 function getZenMoneyBaseUrl(): string {
@@ -165,7 +165,7 @@ function getZenMoneyBaseUrl(): string {
 }
 
 async function fetchZenMoneySnapshot(force = false): Promise<ZenMoneySnapshot> {
-	const token = await getZenMoneyAccessToken();
+	const token = await getZenMoneyToken();
 	if (!token) throw new Error(zenMoneySetupHint());
 
 	if (
