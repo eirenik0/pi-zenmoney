@@ -6,9 +6,9 @@
   "description": "ZenMoney Pi extension for account discovery and register exports.",
   "keywords": ["pi-package", "pi-extension", "zenmoney"],
   "pi": {
-    "extensions": ["./.pi/extensions"]
+    "extensions": ["./src/index.ts"]
   },
-  "files": [".pi/extensions", ".pi/lib", "README.md", "package.json"],
+  "files": ["src", "README.md", "package.json"],
   "dependencies": {
     "effect": "^3.0.0"
   },

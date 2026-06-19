@@ -7,176 +7,24 @@ import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { Data, Effect, Either } from "effect";
 
-import { resolveSecretReference } from "../lib/secret_refs.ts";
-
-const PREVIEW_LINES = 6;
-const SOURCE_VALUES = ["zenmoney"] as const;
-const PERSONAL_REGISTER_COLUMNS = [
-	"id",
-	"period",
-	"date",
-	"account_id",
-	"account_title",
-	"account_company",
-	"currency",
-	"amount",
-	"direction",
-	"counterparty",
-	"description",
-	"transaction_type",
-	"reference",
-	"source",
-	"source_file",
-	"category_id",
-	"category_name",
-	"cashflow_bucket",
-	"cashflow_category",
-	"boundary_entity",
-	"review_status",
-	"classification_source",
-	"linked_transfer_id",
-	"evidence_file",
-	"notes",
-] as const;
-const PERSONAL_REGISTER_PRESERVED_FIELDS = [
-	"cashflow_bucket",
-	"cashflow_category",
-	"boundary_entity",
-	"review_status",
-	"classification_source",
-	"linked_transfer_id",
-	"evidence_file",
-	"notes",
-] as const;
-
-type SourceKind = (typeof SOURCE_VALUES)[number];
-
-interface ZenMoneyInstrument {
-	id: number;
-	title?: string;
-	shortTitle?: string;
-	symbol?: string;
-}
-
-interface ZenMoneyCompany {
-	id: number;
-	title?: string;
-	fullTitle?: string;
-	country?: string;
-}
-
-interface ZenMoneyAccount {
-	id: string;
-	instrument?: number | null;
-	company?: number | null;
-	type?: string;
-	title?: string;
-	syncID?: string[] | null;
-	balance?: number | null;
-	archive?: boolean;
-}
-
-interface ZenMoneyMerchant {
-	id: string;
-	title?: string;
-}
-
-interface ZenMoneyTransaction {
-	id?: string;
-	deleted?: boolean;
-	hold?: boolean | null;
-	incomeInstrument?: number | null;
-	incomeAccount?: string;
-	income?: number;
-	outcomeInstrument?: number | null;
-	outcomeAccount?: string;
-	outcome?: number;
-	merchant?: string | null;
-	payee?: string | null;
-	originalPayee?: string | null;
-	comment?: string | null;
-	date?: string;
-	mcc?: number | null;
-	tag?: string | string[] | null;
-}
-
-interface ZenMoneyCategory {
-	id?: string;
-	title?: string;
-	parentId?: string | null;
-}
-
-interface ZenMoneySnapshot {
-	fetchedAt: number;
-	serverTimestamp: number;
-	instruments: ZenMoneyInstrument[];
-	companies: ZenMoneyCompany[];
-	accounts: ZenMoneyAccount[];
-	merchants: ZenMoneyMerchant[];
-	transactions: ZenMoneyTransaction[];
-	tags?: ZenMoneyCategory[];
-}
-
-interface BankTransactionRow {
-	date: string;
-	amount: number;
-	currency: string;
-	partner: string;
-	description: string;
-	transactionType: string;
-	reference: string;
-	sourceFile: string;
-	source: SourceKind;
-	accountId: string;
-	accountTitle: string;
-	categoryId?: string | null;
-	categoryName?: string | null;
-}
-
-interface PersonalAccountPolicy {
-	personal_selectors?: string[];
-	excluded_business_selectors?: string[];
-	review_only_selectors?: string[];
-	forbidden_broad_selectors?: string[];
-}
-
-interface PersonalClassificationRule {
-	match?: string;
-	bucket?: string;
-	category?: string;
-	requires_review?: boolean;
-	note?: string;
-}
-
-interface PersonalClassificationRules {
-	rules?: PersonalClassificationRule[];
-	internal_transfer_hints?: string[];
-}
-
-interface PersonalRegisterResult {
-	period: string;
-	registerPath: string;
-	dryRun: boolean;
-	fetchedRows: number;
-	existingRows: number;
-	newRows: number;
-	updatedRows: number;
-	totalRows: number;
-	summary: string;
-	warnings: string[];
-}
-
-interface CurrencyTotals {
-	income: number;
-	outcome: number;
-	net: number;
-}
-
-interface ResolvedAccount {
-	account: ZenMoneyAccount;
-	currency: string;
-	company: string;
-}
+import { PERSONAL_REGISTER_COLUMNS, PERSONAL_REGISTER_PRESERVED_FIELDS, PREVIEW_LINES } from "./constants.ts";
+import type {
+	BankTransactionRow,
+	CurrencyTotals,
+	PersonalAccountPolicy,
+	PersonalClassificationRule,
+	PersonalClassificationRules,
+	PersonalRegisterResult,
+	ResolvedAccount,
+	ZenMoneyAccount,
+	ZenMoneyCategory,
+	ZenMoneyCompany,
+	ZenMoneyInstrument,
+	ZenMoneyMerchant,
+	ZenMoneySnapshot,
+	ZenMoneyTransaction,
+} from "./types.ts";
+import { resolveSecretReference } from "./secret-refs.ts";
 
 class ZenMoneyCommandError extends Data.TaggedError("ZenMoneyCommandError")<{
 	message: string;

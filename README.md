@@ -21,7 +21,9 @@ Reload Pi or restart after installing.
 
 ## Loaded extension
 
-- `.pi/extensions/zenmoney.ts`
+- `src/index.ts`
+- `src/zenmoney.ts`
+- `src/secret-refs.ts`
 
 ## Commands
 
