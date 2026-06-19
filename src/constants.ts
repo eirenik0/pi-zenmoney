@@ -1,6 +1,6 @@
 export const PREVIEW_LINES = 6;
 export const SOURCE_VALUES = ["zenmoney"] as const;
-export const PERSONAL_REGISTER_COLUMNS = [
+export const REGISTER_COLUMNS = [
 	"id",
 	"period",
 	"date",
@@ -20,17 +20,15 @@ export const PERSONAL_REGISTER_COLUMNS = [
 	"category_name",
 	"cashflow_bucket",
 	"cashflow_category",
-	"boundary_entity",
 	"review_status",
 	"classification_source",
 	"linked_transfer_id",
 	"evidence_file",
 	"notes",
 ] as const;
-export const PERSONAL_REGISTER_PRESERVED_FIELDS = [
+export const REGISTER_PRESERVED_FIELDS = [
 	"cashflow_bucket",
 	"cashflow_category",
-	"boundary_entity",
 	"review_status",
 	"classification_source",
 	"linked_transfer_id",

@@ -84,14 +84,12 @@ export interface BankTransactionRow {
 	categoryName?: string | null;
 }
 
-export interface PersonalAccountPolicy {
-	personal_selectors?: string[];
-	excluded_business_selectors?: string[];
+export interface ZenMoneyRegisterPolicy {
+	register_selectors?: string[];
 	review_only_selectors?: string[];
-	forbidden_broad_selectors?: string[];
 }
 
-export interface PersonalClassificationRule {
+export interface ZenMoneyClassificationRule {
 	match?: string;
 	bucket?: string;
 	category?: string;
@@ -99,12 +97,12 @@ export interface PersonalClassificationRule {
 	note?: string;
 }
 
-export interface PersonalClassificationRules {
-	rules?: PersonalClassificationRule[];
+export interface ZenMoneyClassificationRules {
+	rules?: ZenMoneyClassificationRule[];
 	internal_transfer_hints?: string[];
 }
 
-export interface PersonalRegisterResult {
+export interface ZenMoneyRegisterResult {
 	period: string;
 	registerPath: string;
 	dryRun: boolean;
@@ -118,13 +116,8 @@ export interface PersonalRegisterResult {
 }
 
 export interface CurrencyTotals {
+	currency: string;
 	income: number;
 	outcome: number;
 	net: number;
-}
-
-export interface ResolvedAccount {
-	account: ZenMoneyAccount;
-	currency: string;
-	company: string;
 }

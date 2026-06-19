@@ -7,24 +7,20 @@ import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Data, Effect, Either } from "effect";
 import { Type } from "typebox";
 
-import {
-	PERSONAL_REGISTER_COLUMNS,
-	PERSONAL_REGISTER_PRESERVED_FIELDS,
-	PREVIEW_LINES,
-} from "./constants.ts";
+import { PREVIEW_LINES, REGISTER_COLUMNS, REGISTER_PRESERVED_FIELDS } from "./constants.ts";
 import { resolveSecretReference } from "./secret-refs.ts";
 import type {
 	BankTransactionRow,
 	CurrencyTotals,
-	PersonalAccountPolicy,
-	PersonalClassificationRules,
-	PersonalRegisterResult,
 	ResolvedAccount,
 	ZenMoneyAccount,
 	ZenMoneyCategory,
+	ZenMoneyClassificationRules,
 	ZenMoneyCompany,
 	ZenMoneyInstrument,
 	ZenMoneyMerchant,
+	ZenMoneyRegisterPolicy,
+	ZenMoneyRegisterResult,
 	ZenMoneySnapshot,
 	ZenMoneyTransaction,
 } from "./types.ts";
@@ -147,7 +143,7 @@ function zenMoneySetupHint(): string {
 		"The value may be a raw token, an `op://` 1Password reference, or a literal `op read ...` / `$(op read ...)` string.",
 		"Then use `/zen-accounts` to discover selectable accounts by id, title, or syncID.",
 		"",
-		"The extension stays separate from accounting automation because the ZenMoney profile may include mixed personal and business accounts.",
+		"The extension focuses on ZenMoney account discovery and transaction export.",
 	].join("\n");
 }
 
@@ -607,7 +603,7 @@ function makeSelectorSlug(selectors: string[]): string {
 	return normalized || "zenmoney-accounts";
 }
 
-function parsePersonalRegisterArgs(raw: string): {
+function parseZenMoneyRegisterArgs(raw: string): {
 	selectors: string[];
 	period?: string;
 	write: boolean;
@@ -638,16 +634,11 @@ function parsePersonalRegisterArgs(raw: string): {
 	};
 }
 
-function expectedPersonalRegisterPath(year: number): string {
-	return join(
-		"Personal",
-		String(year),
-		"Registers",
-		`personal-zenmoney-transactions-${year}.jsonl`,
-	);
+function expectedZenMoneyRegisterPath(year: number): string {
+	return join("ZenMoney", "Registers", `zenmoney-register-${year}.jsonl`);
 }
 
-function personalRegisterRowId(row: BankTransactionRow): string {
+function zenMoneyRegisterRowId(row: BankTransactionRow): string {
 	return `zenmoney:${row.accountId}:${row.reference}`;
 }
 
@@ -698,53 +689,32 @@ async function readJsonObject<T>(path: string): Promise<T | undefined> {
 	return Effect.runPromise(readJsonObjectEffect<T>(path));
 }
 
-async function readPersonalAccountPolicy(): Promise<PersonalAccountPolicy> {
+async function readZenMoneyRegisterPolicy(): Promise<ZenMoneyRegisterPolicy> {
 	return (
-		(await readJsonObject<PersonalAccountPolicy>(
-			join("Personal", "ZenMoney", "personal-accounts.json"),
+		(await readJsonObject<ZenMoneyRegisterPolicy>(join("ZenMoney", "register-policy.json"))) ?? {}
+	);
+}
+
+async function readZenMoneyClassificationRules(): Promise<ZenMoneyClassificationRules> {
+	return (
+		(await readJsonObject<ZenMoneyClassificationRules>(
+			join("ZenMoney", "classification-rules.json"),
 		)) ?? {}
 	);
 }
 
-async function readPersonalClassificationRules(): Promise<PersonalClassificationRules> {
-	return (
-		(await readJsonObject<PersonalClassificationRules>(
-			join("Personal", "ZenMoney", "classification-rules.json"),
-		)) ?? {}
-	);
-}
-
-function resolvePersonalSelectors(
+function resolveZenMoneySelectors(
 	explicitSelectors: string[],
-	policy: PersonalAccountPolicy,
+	policy: ZenMoneyRegisterPolicy,
 ): string[] {
 	const selectors =
-		explicitSelectors.length > 0 ? explicitSelectors : (policy.personal_selectors ?? []);
+		explicitSelectors.length > 0 ? explicitSelectors : (policy.register_selectors ?? []);
 	if (selectors.length === 0) {
 		throw new Error(
-			"No personal ZenMoney selectors configured. Add Personal/ZenMoney/personal-accounts.json or pass explicit selectors.",
+			"No ZenMoney selectors configured. Add ZenMoney/register-policy.json or pass explicit selectors.",
 		);
 	}
 
-	const forbidden = new Set(
-		(policy.forbidden_broad_selectors ?? []).map((selector) => normalizeText(selector)),
-	);
-	const excluded = new Set(
-		(policy.excluded_business_selectors ?? []).map((selector) => normalizeText(selector)),
-	);
-	const errors: string[] = [];
-
-	selectors.forEach((selector) => {
-		const normalized = normalizeText(selector);
-		if (forbidden.has(normalized))
-			errors.push(`Selector \`${selector}\` is a forbidden broad selector.`);
-		if (excluded.has(normalized))
-			errors.push(
-				`Selector \`${selector}\` is a business account selector and cannot be used for personal registers.`,
-			);
-	});
-
-	if (errors.length > 0) throw new Error(errors.join("\n"));
 	return selectors;
 }
 
@@ -769,18 +739,18 @@ function readJsonlRecords(text: string): Array<Record<string, string>> {
 	return rows;
 }
 
-async function readPersonalRegisterRows(path: string): Promise<Array<Record<string, string>>> {
+async function readZenMoneyRegisterRows(path: string): Promise<Array<Record<string, string>>> {
 	if (!(await pathExists(path))) return [];
 	return readJsonlRecords(await fs.readFile(path, "utf8"));
 }
 
-function orderPersonalRegisterRow(row: Record<string, string>): Record<string, string> {
+function orderZenMoneyRegisterRow(row: Record<string, string>): Record<string, string> {
 	const ordered: Record<string, string> = {};
-	PERSONAL_REGISTER_COLUMNS.forEach((column) => {
+	REGISTER_COLUMNS.forEach((column) => {
 		if (row[column] !== undefined) ordered[column] = row[column];
 	});
 	Object.keys(row)
-		.filter((key) => !(PERSONAL_REGISTER_COLUMNS as readonly string[]).includes(key))
+		.filter((key) => !(REGISTER_COLUMNS as readonly string[]).includes(key))
 		.sort()
 		.forEach((key) => {
 			ordered[key] = row[key];
@@ -788,7 +758,7 @@ function orderPersonalRegisterRow(row: Record<string, string>): Record<string, s
 	return ordered;
 }
 
-function sortPersonalRegisterRows(
+function sortZenMoneyRegisterRows(
 	left: Record<string, string>,
 	right: Record<string, string>,
 ): number {
@@ -799,15 +769,12 @@ function sortPersonalRegisterRows(
 	return (left.id || "").localeCompare(right.id || "");
 }
 
-async function writePersonalRegisterRows(
+async function writeZenMoneyRegisterRows(
 	path: string,
 	rows: Array<Record<string, string>>,
 ): Promise<void> {
-	await fs.mkdir(
-		join("Personal", String(path.match(/(\d{4})/)?.[1] ?? new Date().getFullYear()), "Registers"),
-		{ recursive: true },
-	);
-	const content = rows.map((row) => JSON.stringify(orderPersonalRegisterRow(row))).join("\n");
+	await fs.mkdir(join("ZenMoney", "Registers"), { recursive: true });
+	const content = rows.map((row) => JSON.stringify(orderZenMoneyRegisterRow(row))).join("\n");
 	await fs.writeFile(path, `${content}${content ? "\n" : ""}`, "utf8");
 }
 
@@ -827,12 +794,12 @@ function buildLinkedTransferMap(rows: BankTransactionRow[]): Map<string, string>
 		if (!hasIncome || !hasOutcome) return;
 
 		group.forEach((row) => {
-			const id = personalRegisterRowId(row);
+			const id = zenMoneyRegisterRowId(row);
 			linked.set(
 				id,
 				group
 					.filter((candidate) => candidate !== row)
-					.map((candidate) => personalRegisterRowId(candidate))
+					.map((candidate) => zenMoneyRegisterRowId(candidate))
 					.join(";"),
 			);
 		});
@@ -844,16 +811,9 @@ function rowText(row: BankTransactionRow): string {
 	return [row.partner, row.description, row.categoryName ?? ""].filter(Boolean).join(" | ");
 }
 
-function boundaryEntityFromText(text: string, category?: string): string {
-	const normalized = normalizeText(`${text} ${category ?? ""}`);
-	if (normalized.includes("fluxomnia") || normalized.includes("1193")) return "Fluxomnia";
-	if (normalized.includes("zivnost") || normalized.includes("2119")) return "Zivnost";
-	return "";
-}
-
 function rowMatchesReviewOnlyAccount(
 	row: BankTransactionRow,
-	policy: PersonalAccountPolicy,
+	policy: ZenMoneyRegisterPolicy,
 ): boolean {
 	const normalizedPartner = normalizeText(row.partner);
 	return (policy.review_only_selectors ?? []).some((selector) =>
@@ -861,30 +821,24 @@ function rowMatchesReviewOnlyAccount(
 	);
 }
 
-function classifyPersonalRegisterRow(
+function classifyZenMoneyRegisterRow(
 	row: BankTransactionRow,
 	linkedTransferId: string | undefined,
-	policy: PersonalAccountPolicy,
-	rules: PersonalClassificationRules,
+	policy: ZenMoneyRegisterPolicy,
+	rules: ZenMoneyClassificationRules,
 	warnings: string[],
 ): Pick<
 	Record<string, string>,
-	| "cashflow_bucket"
-	| "cashflow_category"
-	| "boundary_entity"
-	| "review_status"
-	| "classification_source"
-	| "notes"
+	"cashflow_bucket" | "cashflow_category" | "review_status" | "classification_source" | "notes"
 > {
 	const text = rowText(row);
 	if (linkedTransferId) {
 		return {
 			cashflow_bucket: "internal_transfer",
 			cashflow_category: "own_account_transfer",
-			boundary_entity: "",
 			review_status: "excluded",
 			classification_source: "transfer_pair",
-			notes: "Paired ZenMoney rows across selected personal accounts.",
+			notes: "Paired ZenMoney rows across selected accounts.",
 		};
 	}
 
@@ -892,7 +846,6 @@ function classifyPersonalRegisterRow(
 		return {
 			cashflow_bucket: "manual_review",
 			cashflow_category: "review_only_account_transfer",
-			boundary_entity: "",
 			review_status: "needs_review",
 			classification_source: "account_policy",
 			notes: "Counterparty matches a review-only account selector.",
@@ -906,7 +859,6 @@ function classifyPersonalRegisterRow(
 		return {
 			cashflow_bucket: "internal_transfer",
 			cashflow_category: "savings_investment",
-			boundary_entity: "",
 			review_status: "excluded",
 			classification_source: "zenmoney_category",
 			notes: "Savings/investment movement outside real spending.",
@@ -926,7 +878,7 @@ function classifyPersonalRegisterRow(
 		if (Either.isLeft(patternResult)) {
 			const error = patternResult.left;
 			warnings.push(
-				`Skipped invalid personal classification rule \`${rule.match}\`: ${error instanceof Error ? error.message : String(error)}`,
+				`Skipped invalid ZenMoney classification rule \`${rule.match}\`: ${error instanceof Error ? error.message : String(error)}`,
 			);
 			continue;
 		}
@@ -938,13 +890,9 @@ function classifyPersonalRegisterRow(
 		return {
 			cashflow_bucket: bucket,
 			cashflow_category:
-				rule.category || row.categoryName || (row.amount >= 0 ? "other_income" : "other_personal"),
-			boundary_entity:
-				bucket === "business_boundary" ? boundaryEntityFromText(text, rule.category) : "",
+				rule.category || row.categoryName || (row.amount >= 0 ? "other_income" : "other_zenmoney"),
 			review_status:
-				rule.requires_review || bucket === "manual_review" || bucket === "business_boundary"
-					? "needs_review"
-					: "auto_classified",
+				rule.requires_review || bucket === "manual_review" ? "needs_review" : "auto_classified",
 			classification_source: "classification_rules",
 			notes: rule.note ?? "",
 		};
@@ -961,8 +909,7 @@ function classifyPersonalRegisterRow(
 		cashflow_bucket: row.amount >= 0 ? "real_income" : "real_expense",
 		cashflow_category: refundLike
 			? "refund"
-			: categoryName || (row.amount >= 0 ? "other_income" : "other_personal"),
-		boundary_entity: "",
+			: categoryName || (row.amount >= 0 ? "other_income" : "other_zenmoney"),
 		review_status: "auto_classified",
 		classification_source: categoryName ? "zenmoney_category" : "amount_default",
 		notes:
@@ -972,20 +919,20 @@ function classifyPersonalRegisterRow(
 	};
 }
 
-function buildPersonalRegisterRows(
+function buildZenMoneyRegisterRows(
 	rows: BankTransactionRow[],
 	accounts: ResolvedAccount[],
-	policy: PersonalAccountPolicy,
-	rules: PersonalClassificationRules,
+	policy: ZenMoneyRegisterPolicy,
+	rules: ZenMoneyClassificationRules,
 	warnings: string[],
 ): Array<Record<string, string>> {
 	const accountCompanyById = new Map(accounts.map((entry) => [entry.account.id, entry.company]));
 	const linkedTransfers = buildLinkedTransferMap(rows);
 
 	return rows.map((row) => {
-		const id = personalRegisterRowId(row);
+		const id = zenMoneyRegisterRowId(row);
 		const linkedTransferId = linkedTransfers.get(id);
-		const classification = classifyPersonalRegisterRow(
+		const classification = classifyZenMoneyRegisterRow(
 			row,
 			linkedTransferId,
 			policy,
@@ -1017,7 +964,7 @@ function buildPersonalRegisterRows(
 	});
 }
 
-function mergePersonalRegisterRows(
+function mergeZenMoneyRegisterRows(
 	existingRows: Array<Record<string, string>>,
 	generatedRows: Array<Record<string, string>>,
 ): { rows: Array<Record<string, string>>; newRows: number; updatedRows: number } {
@@ -1034,24 +981,24 @@ function mergePersonalRegisterRows(
 		}
 
 		const merged = { ...existing, ...generated };
-		PERSONAL_REGISTER_PRESERVED_FIELDS.forEach((field) => {
+		REGISTER_PRESERVED_FIELDS.forEach((field) => {
 			if (existing[field]) merged[field] = existing[field];
 		});
 
 		if (
-			JSON.stringify(orderPersonalRegisterRow(existing)) !==
-			JSON.stringify(orderPersonalRegisterRow(merged))
+			JSON.stringify(orderZenMoneyRegisterRow(existing)) !==
+			JSON.stringify(orderZenMoneyRegisterRow(merged))
 		) {
 			updatedRows += 1;
 		}
 		byId.set(generated.id, merged);
 	});
 
-	return { rows: [...byId.values()].sort(sortPersonalRegisterRows), newRows, updatedRows };
+	return { rows: [...byId.values()].sort(sortZenMoneyRegisterRows), newRows, updatedRows };
 }
 
-function formatPersonalRegisterSummary(
-	result: Omit<PersonalRegisterResult, "summary">,
+function formatZenMoneyRegisterSummary(
+	result: Omit<ZenMoneyRegisterResult, "summary">,
 	periodRows: Array<Record<string, string>>,
 	selectors: string[],
 ): string {
@@ -1073,7 +1020,7 @@ function formatPersonalRegisterSummary(
 	>());
 
 	const lines: string[] = [
-		`# Personal ZenMoney Register — ${result.period}`,
+		`# ZenMoney Register — ${result.period}`,
 		"",
 		`- Mode: ${result.dryRun ? "dry run (no files written)" : "written"}`,
 		`- Register path: \`${result.registerPath}\``,
@@ -1139,36 +1086,36 @@ function formatPersonalRegisterSummary(
 	return lines.join("\n");
 }
 
-// @lat: [[personal-finances#Personal Finances#ZenMoney Personal Transaction Register]]
-async function preparePersonalTransactionRegister(params: {
+// @lat: [[data-workflows#Data Workflows#ZenMoney Transaction Register]]
+async function prepareZenMoneyRegister(params: {
 	period: string;
 	selectors?: string[];
 	write?: boolean;
-}): Promise<PersonalRegisterResult> {
+}): Promise<ZenMoneyRegisterResult> {
 	const period = parseMonthPeriod(params.period);
 	if (!period) throw new Error(`Invalid period \`${params.period}\`. Expected format: YYYY-MM.`);
 
 	const year = Number.parseInt(period.slice(0, 4), 10);
-	const policy = await readPersonalAccountPolicy();
-	const rules = await readPersonalClassificationRules();
-	const selectors = resolvePersonalSelectors(params.selectors ?? [], policy);
-	const registerPath = expectedPersonalRegisterPath(year);
+	const policy = await readZenMoneyRegisterPolicy();
+	const rules = await readZenMoneyClassificationRules();
+	const selectors = resolveZenMoneySelectors(params.selectors ?? [], policy);
+	const registerPath = expectedZenMoneyRegisterPath(year);
 	const warnings: string[] = [];
 
 	const source = await readZenMoneyTransactions(selectors, period);
-	const generatedRows = buildPersonalRegisterRows(
+	const generatedRows = buildZenMoneyRegisterRows(
 		source.transactions,
 		source.accounts,
 		policy,
 		rules,
 		warnings,
 	);
-	const existingRows = await readPersonalRegisterRows(registerPath);
-	const merged = mergePersonalRegisterRows(existingRows, generatedRows);
+	const existingRows = await readZenMoneyRegisterRows(registerPath);
+	const merged = mergeZenMoneyRegisterRows(existingRows, generatedRows);
 
-	if (params.write) await writePersonalRegisterRows(registerPath, merged.rows);
+	if (params.write) await writeZenMoneyRegisterRows(registerPath, merged.rows);
 
-	const resultWithoutSummary: Omit<PersonalRegisterResult, "summary"> = {
+	const resultWithoutSummary: Omit<ZenMoneyRegisterResult, "summary"> = {
 		period,
 		registerPath,
 		dryRun: !params.write,
@@ -1182,11 +1129,11 @@ async function preparePersonalTransactionRegister(params: {
 
 	return {
 		...resultWithoutSummary,
-		summary: formatPersonalRegisterSummary(resultWithoutSummary, generatedRows, selectors),
+		summary: formatZenMoneyRegisterSummary(resultWithoutSummary, generatedRows, selectors),
 	};
 }
 
-function parsePersonalBalanceArgs(raw: string): {
+function parseZenMoneyBalanceArgs(raw: string): {
 	selectors: string[];
 	period?: string;
 	store: boolean;
@@ -1205,7 +1152,7 @@ function parsePersonalBalanceArgs(raw: string): {
 	});
 
 	if (cleanTokens.length === 0) {
-		const envSelectors = process.env.ZENMONEY_PERSONAL_SELECTORS?.trim();
+		const envSelectors = process.env.ZENMONEY_REGISTER_SELECTORS?.trim();
 		if (envSelectors) {
 			return {
 				selectors: splitSelectors(envSelectors),
@@ -1225,7 +1172,7 @@ function parsePersonalBalanceArgs(raw: string): {
 
 	const selectorText = cleanTokens.join(" ").trim();
 	if (!selectorText) {
-		const envSelectors = process.env.ZENMONEY_PERSONAL_SELECTORS?.trim();
+		const envSelectors = process.env.ZENMONEY_REGISTER_SELECTORS?.trim();
 		if (envSelectors) {
 			return {
 				selectors: splitSelectors(envSelectors),
@@ -1243,7 +1190,7 @@ function parsePersonalBalanceArgs(raw: string): {
 	};
 }
 
-function buildPersonalBalanceSummary(
+function buildZenMoneyBalanceSummary(
 	rows: BankTransactionRow[],
 	selectors: string[],
 	period: string | undefined,
@@ -1252,7 +1199,7 @@ function buildPersonalBalanceSummary(
 ): string {
 	const transactionSummary = formatTransactionsSummary(rows, selectors, period, accounts);
 	const lines: string[] = [
-		"# ZenMoney Personal Balance",
+		"# ZenMoney Balance",
 		"",
 		`- Source: ZenMoney API`,
 		`- Account selectors: ${selectors.join(", ")}`,
@@ -1326,7 +1273,7 @@ async function readZenMoneyTransactions(
 	};
 }
 
-async function readPersonalBalanceSnapshot(params: {
+async function readZenMoneyBalanceSnapshot(params: {
 	selectors: string[];
 	period?: string;
 }): Promise<{
@@ -1356,7 +1303,7 @@ async function readPersonalBalanceSnapshot(params: {
 		return map;
 	}, new Map<string, CurrencyTotals>());
 
-	const summary = buildPersonalBalanceSummary(
+	const summary = buildZenMoneyBalanceSummary(
 		result.transactions,
 		params.selectors,
 		params.period,
@@ -1382,7 +1329,7 @@ async function readPersonalBalanceSnapshot(params: {
 	};
 }
 
-async function storePersonalBalanceSnapshot(params: {
+async function storeZenMoneyBalanceSnapshot(params: {
 	selectors: string[];
 	period?: string;
 	summary: string;
@@ -1398,7 +1345,7 @@ async function storePersonalBalanceSnapshot(params: {
 	const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 	const filePrefix = `${selectorSlug}-${periodPart}-${timestamp}`;
 
-	const baseDir = join("Personal", "ZenMoney", "snapshots");
+	const baseDir = join("ZenMoney", "Snapshots");
 	await fs.mkdir(baseDir, { recursive: true });
 
 	const jsonPath = join(baseDir, `${filePrefix}.json`);
@@ -1449,7 +1396,7 @@ async function sendZenMoneyReport(pi: ExtensionAPI, title: string, body: string)
 	});
 }
 
-// @lat: [[automation#Accounting Automation#Extension#ZenMoney Live Bank Data]]
+// @lat: [[extension#ZenMoney Live Bank Data]]
 export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 	pi.registerMessageRenderer(
 		"zenmoney-report",
@@ -1513,13 +1460,13 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("zen-personal-balance", {
-		description: "Summarize ZenMoney balances and monthly totals for personal accounts",
+	pi.registerCommand("zen-balance", {
+		description: "Summarize ZenMoney balances and monthly totals for ZenMoney accounts",
 		handler: async (args: string, ctx: CommandContext) => {
-			const parsed = parsePersonalBalanceArgs(args);
+			const parsed = parseZenMoneyBalanceArgs(args);
 			if (parsed.selectors.length === 0) {
 				ctx.ui.notify(
-					"Usage: /zen-personal-balance <selector[,selector...]> [YYYY-MM] [--store].\nIf selectors are omitted, set ZENMONEY_PERSONAL_SELECTORS.",
+					"Usage: /zen-balance <selector[,selector...]> [YYYY-MM] [--store].\nIf selectors are omitted, set ZENMONEY_REGISTER_SELECTORS.",
 					"error",
 				);
 				return;
@@ -1529,7 +1476,7 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 				ctx,
 				Effect.gen(function* () {
 					const result = yield* effectFromZenMoneyPromise(() =>
-						readPersonalBalanceSnapshot({
+						readZenMoneyBalanceSnapshot({
 							selectors: parsed.selectors,
 							period: parsed.period,
 						}),
@@ -1538,7 +1485,7 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 					let summary = result.summary;
 					if (parsed.store) {
 						const saved = yield* effectFromZenMoneyPromise(() =>
-							storePersonalBalanceSnapshot({
+							storeZenMoneyBalanceSnapshot({
 								selectors: parsed.selectors,
 								period: parsed.period,
 								summary: result.summary,
@@ -1556,7 +1503,7 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 					yield* Effect.sync(() => {
 						sendZenMoneyReport(
 							pi,
-							`ZenMoney personal balance ${parsed.selectors.join(",")} ${parsed.period ?? "all"}`,
+							`ZenMoney balance ${parsed.selectors.join(",")} ${parsed.period ?? "all"}`,
 							summary,
 						);
 					});
@@ -1565,13 +1512,13 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("zen-personal-register", {
-		description: "Preview or write the canonical personal ZenMoney transaction JSONL register",
+	pi.registerCommand("zen-register", {
+		description: "Preview or write the canonical ZenMoney transaction JSONL register",
 		handler: async (args: string, ctx: CommandContext) => {
-			const parsed = parsePersonalRegisterArgs(args);
+			const parsed = parseZenMoneyRegisterArgs(args);
 			if (!parsed.period) {
 				ctx.ui.notify(
-					"Usage: /zen-personal-register <YYYY-MM> [--write] [selector[,selector...]].\nIf selectors are omitted, Personal/ZenMoney/personal-accounts.json is used.",
+					"Usage: /zen-register <YYYY-MM> [--write] [selector[,selector...]].\nIf selectors are omitted, ZenMoney/register-policy.json is used.",
 					"error",
 				);
 				return;
@@ -1582,14 +1529,14 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 				ctx,
 				Effect.gen(function* () {
 					const result = yield* effectFromZenMoneyPromise(() =>
-						preparePersonalTransactionRegister({
+						prepareZenMoneyRegister({
 							period,
 							selectors: parsed.selectors.length > 0 ? parsed.selectors : undefined,
 							write: parsed.write,
 						}),
 					);
 					yield* Effect.sync(() => {
-						sendZenMoneyReport(pi, `ZenMoney personal register ${period}`, result.summary);
+						sendZenMoneyReport(pi, `ZenMoney register ${period}`, result.summary);
 					});
 				}),
 			);
@@ -1599,12 +1546,10 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "zenmoney_list_accounts",
 		label: "ZenMoney List Accounts",
-		description:
-			"List ZenMoney accounts so personal and business accounts can be selected explicitly",
-		promptSnippet:
-			"List available ZenMoney accounts before selecting which ones belong to a business workflow",
+		description: "List ZenMoney accounts for explicit selection",
+		promptSnippet: "List available ZenMoney accounts before selecting accounts for a query",
 		promptGuidelines: [
-			"Use this tool before fetching transactions from ZenMoney when the profile mixes personal and business accounts.",
+			"Use this tool before fetching transactions from ZenMoney when you want to narrow the selected accounts.",
 			"Selectors can match account id, title substring, company substring, or syncID / last digits.",
 		],
 		parameters: Type.Object({
@@ -1645,16 +1590,15 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
-		name: "zenmoney_personal_balance",
-		label: "ZenMoney Personal Balance",
-		description: "Summarize personal ZenMoney account balances and transaction totals",
-		promptSnippet:
-			"Summarize personal account balances and monthly spend/income before personal budgeting",
+		name: "zenmoney_balance",
+		label: "ZenMoney Balance",
+		description: "Summarize ZenMoney account balances and transaction totals",
+		promptSnippet: "Summarize ZenMoney account balances and monthly spend/income before budgeting",
 		promptGuidelines: [
-			"Use explicit selectors to avoid mixing business and personal accounts.",
+			"Use explicit selectors to avoid mixing unrelated accounts.",
 			"Pass selectors that match account id, title substring, company substring, or syncID / last digits.",
 			"Use period to narrow results to one month, for example 2026-03.",
-			"Enable store=true to persist JSON and CSV snapshot under Personal/ZenMoney/snapshots.",
+			"Enable store=true to persist JSON and CSV snapshot under ZenMoney/Snapshots.",
 		],
 		parameters: Type.Object({
 			selectors: Type.Array(
@@ -1662,7 +1606,7 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 			),
 			period: Type.Optional(Type.String({ description: "Optional month filter such as 2026-03" })),
 			store: Type.Optional(
-				Type.Boolean({ description: "Persist a local Personal/ZenMoney snapshot (JSON + CSV)" }),
+				Type.Boolean({ description: "Persist a local ZenMoney snapshot (JSON + CSV)" }),
 			),
 		}),
 		async execute(
@@ -1673,14 +1617,14 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 				store?: boolean;
 			},
 		) {
-			const result = await readPersonalBalanceSnapshot({
+			const result = await readZenMoneyBalanceSnapshot({
 				selectors: params.selectors,
 				period: params.period,
 			});
 
 			let saved: { jsonPath: string; csvPath: string } | undefined;
 			if (params.store) {
-				saved = await storePersonalBalanceSnapshot({
+				saved = await storeZenMoneyBalanceSnapshot({
 					selectors: params.selectors,
 					period: params.period,
 					summary: result.summary,
@@ -1720,7 +1664,7 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 		},
 		renderCall(args: { selectors: string[]; period?: string; store?: boolean }, theme: Theme) {
 			return new Text(
-				`${theme.fg("toolTitle", theme.bold("zenmoney_personal_balance "))}${theme.fg("dim", `${args.selectors.join(",")} ${args.period || "all"}`)}`,
+				`${theme.fg("toolTitle", theme.bold("zenmoney_balance "))}${theme.fg("dim", `${args.selectors.join(",")} ${args.period || "all"}`)}`,
 				0,
 				0,
 			);
@@ -1729,15 +1673,15 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
-		name: "zenmoney_personal_register",
-		label: "ZenMoney Personal Register",
-		description: "Create or preview a canonical personal ZenMoney transaction JSONL register",
+		name: "zenmoney_register",
+		label: "ZenMoney Register",
+		description: "Create or preview a canonical ZenMoney transaction JSONL register",
 		promptSnippet:
-			"Store personal ZenMoney transactions as one JSONL row per account-side transaction before monthly reporting",
+			"Store ZenMoney transactions as one JSONL row per account-side transaction before monthly reporting",
 		promptGuidelines: [
-			"Use this tool when personal reports should use the same JSONL source-of-truth pattern as business registers.",
+			"Use this tool when you want the same JSONL source-of-truth pattern for ZenMoney transactions.",
 			"Use period to narrow the import to one month, for example 2026-03.",
-			"Omit selectors to use Personal/ZenMoney/personal-accounts.json; pass selectors only when the user explicitly wants a different safe scope.",
+			"Omit selectors to use ZenMoney/register-policy.json; pass selectors only when you want a different account scope.",
 			"Set write=true only after reviewing the dry-run summary.",
 		],
 		parameters: Type.Object({
@@ -1750,7 +1694,7 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_id: string, params: { period: string; selectors?: string[]; write?: boolean }) {
-			const result = await preparePersonalTransactionRegister({
+			const result = await prepareZenMoneyRegister({
 				period: params.period,
 				selectors: params.selectors,
 				write: params.write,
@@ -1772,7 +1716,7 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 		},
 		renderCall(args: { period: string; selectors?: string[]; write?: boolean }, theme: Theme) {
 			return new Text(
-				`${theme.fg("toolTitle", theme.bold("zenmoney_personal_register "))}${theme.fg("dim", `${args.period}${args.write ? " --write" : ""}${args.selectors?.length ? ` ${args.selectors.join(",")}` : " policy"}`)}`,
+				`${theme.fg("toolTitle", theme.bold("zenmoney_register "))}${theme.fg("dim", `${args.period}${args.write ? " --write" : ""}${args.selectors?.length ? ` ${args.selectors.join(",")}` : " policy"}`)}`,
 				0,
 				0,
 			);
@@ -1786,7 +1730,7 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 		description: "Fetch normalized ZenMoney transactions for explicitly selected accounts",
 		promptSnippet: "Fetch actual bank data from ZenMoney for explicitly selected accounts",
 		promptGuidelines: [
-			"Use zenmoney_list_accounts first when the ZenMoney profile mixes personal and business accounts.",
+			"Use zenmoney_list_accounts first when you need to choose the relevant accounts.",
 			"Pass selectors that match account id, title substring, company substring, or syncID / last digits.",
 			"Use period to narrow results to one month, for example 2026-03.",
 		],
