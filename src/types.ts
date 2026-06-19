@@ -1,4 +1,4 @@
-import { SOURCE_VALUES } from "./constants.ts";
+import type { SOURCE_VALUES } from "./constants.ts";
 
 export type SourceKind = (typeof SOURCE_VALUES)[number];
 

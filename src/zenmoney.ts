@@ -4,15 +4,19 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import type { Theme } from "@earendil-works/pi-tui";
 import { Markdown, Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
 import { Data, Effect, Either } from "effect";
+import { Type } from "typebox";
 
-import { PERSONAL_REGISTER_COLUMNS, PERSONAL_REGISTER_PRESERVED_FIELDS, PREVIEW_LINES } from "./constants.ts";
+import {
+	PERSONAL_REGISTER_COLUMNS,
+	PERSONAL_REGISTER_PRESERVED_FIELDS,
+	PREVIEW_LINES,
+} from "./constants.ts";
+import { resolveSecretReference } from "./secret-refs.ts";
 import type {
 	BankTransactionRow,
 	CurrencyTotals,
 	PersonalAccountPolicy,
-	PersonalClassificationRule,
 	PersonalClassificationRules,
 	PersonalRegisterResult,
 	ResolvedAccount,
@@ -24,7 +28,6 @@ import type {
 	ZenMoneySnapshot,
 	ZenMoneyTransaction,
 } from "./types.ts";
-import { resolveSecretReference } from "./secret-refs.ts";
 
 class ZenMoneyCommandError extends Data.TaggedError("ZenMoneyCommandError")<{
 	message: string;
@@ -127,7 +130,7 @@ function csvCell(value: string | number | undefined): string {
 
 function buildCsv(headers: string[], rows: Array<Array<string | number | undefined>>): string {
 	const lines = [headers.map((header) => csvCell(header)).join(",")];
-	rows.forEach((row) => lines.push(row.map((value) => csvCell(value)).join(",")));
+	for (const row of rows) lines.push(row.map((value) => csvCell(value)).join(","));
 	return `${lines.join("\n")}\n`;
 }
 
@@ -561,7 +564,7 @@ function formatTransactionsSummary(
 
 	if (accountNames.length > 0) {
 		lines.push("## Accounts", "");
-		accountNames.forEach((name) => lines.push(`- ${name}`));
+		for (const name of accountNames) lines.push(`- ${name}`);
 		lines.push("");
 	}
 
@@ -1126,7 +1129,7 @@ function formatPersonalRegisterSummary(
 
 	if (result.warnings.length > 0) {
 		lines.push("## Warnings", "");
-		[...new Set(result.warnings)].forEach((warning) => lines.push(`- ${warning}`));
+		for (const warning of [...new Set(result.warnings)]) lines.push(`- ${warning}`);
 		lines.push("");
 	}
 
