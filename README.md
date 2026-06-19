@@ -37,6 +37,14 @@ Optional:
 - `ZENMONEY_API_BASE_URL`
 - `ZENMONEY_PERSONAL_SELECTORS` — fallback selectors for `/zen-personal-balance` when none are passed
 
+## ZenMoney API
+
+This extension is built on the official ZenMoney API:
+
+- https://github.com/zenmoney/ZenPlugins/wiki/ZenMoney-API
+
+If you only need an API token, the ZenMoney wiki notes that you can get one without registering a new service, by using a previously registered ZenMoney service. For example: [Zerro.app](https://zerro.app/token).
+
 ## Notes
 
 - Project-local extension entrypoint: `src/index.ts`
