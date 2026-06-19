@@ -1,0 +1,20 @@
+{
+  "name": "pi-zenmoney-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ZenMoney Pi extension for account discovery and register exports.",
+  "keywords": ["pi-package", "pi-extension", "zenmoney"],
+  "pi": {
+    "extensions": ["./.pi/extensions"]
+  },
+  "files": [".pi/extensions", ".pi/lib", "README.md", "package.json"],
+  "dependencies": {
+    "effect": "^3.0.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}
