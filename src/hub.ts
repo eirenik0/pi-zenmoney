@@ -111,6 +111,7 @@ export class ZenMoneyHubEditor {
 	private snapshotPathDraft = "";
 	private snapshotPathBase = "";
 	private errorMessage = "";
+	private showArchived = false;
 
 	constructor(
 		private readonly tui: { requestRender(): void },
@@ -204,8 +205,9 @@ export class ZenMoneyHubEditor {
 
 	private filteredAccounts(): ResolvedAccount[] {
 		const query = this.accountSearchQuery.trim();
-		if (!query) return this.accounts;
-		return this.accounts.filter((account) => this.accountMatchesQuery(account, query));
+		const source = this.showArchived ? this.allAccounts : this.accounts;
+		if (!query) return source;
+		return source.filter((account) => this.accountMatchesQuery(account, query));
 	}
 
 	private profileMatchesQuery(profile: ZenMoneyWorkingProfile, query: string): boolean {
@@ -545,6 +547,12 @@ export class ZenMoneyHubEditor {
 				this.refresh();
 				return;
 			}
+			if (matchesKey(data, "ctrl+a")) {
+				this.showArchived = !this.showArchived;
+				this.ensureAccountSelectionVisible();
+				this.refresh();
+				return;
+			}
 			if (isReturnInput(data)) {
 				this.mode = "settings";
 				this.refresh();
@@ -665,14 +673,21 @@ export class ZenMoneyHubEditor {
 
 		lines.push(border("├") + border("─".repeat(innerWidth)) + border("┤"));
 		lines.push(
-			border("│") + panel(this.theme.fg("accent", ` Accounts for ${profile.entity}`)) + border("│"),
+			border("│") +
+				panel(
+					this.theme.fg(
+						"accent",
+						` Accounts for ${profile.entity}${this.showArchived ? " (incl. archived)" : ""}`,
+					),
+				) +
+				border("│"),
 		);
 		lines.push(
 			border("│") +
 				panel(
 					this.theme.fg(
 						"dim",
-						` accounts search: ${this.accountSearchQuery || "—"} • selected: ${this.selectedAccountIds.size}`,
+						` accounts search: ${this.accountSearchQuery || "—"} • selected: ${this.selectedAccountIds.size} • archived: ${this.showArchived ? "on" : "off"}`,
 					),
 				) +
 				border("│"),
@@ -731,7 +746,7 @@ export class ZenMoneyHubEditor {
 						"dim",
 						this.mode === "settings"
 							? " settings: type to edit path • enter saves • esc restores/back"
-							: " settings: tab to edit snapshot path",
+							: " settings: tab to edit snapshot path • ctrl+a toggles archived accounts",
 					),
 				) +
 				border("│"),
@@ -740,7 +755,10 @@ export class ZenMoneyHubEditor {
 		lines.push(
 			border("│") +
 				panel(
-					this.theme.fg("dim", " Profiles: type to filter • ↑↓ move • Enter accounts • Tab next"),
+					this.theme.fg(
+						"dim",
+						" Profiles: type to filter • ↑↓ move • Enter accounts • Tab next • ctrl+a archived",
+					),
 				) +
 				border("│"),
 		);

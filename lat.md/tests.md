@@ -24,7 +24,7 @@ The balance summary shown in `/zenmoney` and `zenmoney_balance` should agree on 
 
 ## Profile browsing
 
-The interactive editor should list available profiles, hide archived accounts by default, show the selected profile's current accounts, and keep navigation stable when the profile list changes.
+The interactive editor should list available profiles, hide archived accounts by default, let users opt in to showing archived accounts, show the selected profile's current accounts, and keep navigation stable when the profile list changes.
 
 ## Profile creation
 
