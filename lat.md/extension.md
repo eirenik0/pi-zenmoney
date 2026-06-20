@@ -8,4 +8,6 @@ The extension turns ZenMoney API data into selectable account listings, normaliz
 
 `/zenmoney` opens the settings hub for profiles, accounts, snapshot-path setup, and an inline balance summary. Archived accounts stay hidden by default, and the balance workflow and tool both accept `--snapshot-path` / `snapshotPath`, which must stay relative to the working files folder. The latest live snapshot is cached per entity in `.pi/zenmoney/entities/<entity>/registry.json`.
 
+Transaction summaries now spell out the clear-spending rule: only rows classified as `outcome` are counted, while transfers and holds are excluded. A row becomes `transfer` only when ZenMoney reports both income and outcome amounts for the same transaction.
+
 Key code paths: [[src/zenmoney.ts#registerZenMoneyExtension]], [[src/hub.ts#ZenMoneyHubEditor]], [[src/zenmoney.ts#readZenMoneyTransactions]], [[src/zenmoney.ts#readZenMoneyBalanceSnapshot]], [[src/zenmoney.ts#storeZenMoneyBalanceSnapshot]].

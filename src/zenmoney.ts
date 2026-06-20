@@ -309,6 +309,23 @@ function dedupeText(values: Array<string | undefined | null>): string {
 	return unique.join(" | ");
 }
 
+function isZenMoneyTransfer(transaction: ZenMoneyTransaction): boolean {
+	return (transaction.income ?? 0) > 0 && (transaction.outcome ?? 0) > 0;
+}
+
+function summarizeClearSpending(
+	rows: BankTransactionRow[],
+): Map<string, { count: number; amount: number }> {
+	return rows.reduce((map, row) => {
+		if (row.transactionType !== "outcome" || row.amount >= 0) return map;
+		const entry = map.get(row.currency) ?? { count: 0, amount: 0 };
+		entry.count += 1;
+		entry.amount += Math.abs(row.amount);
+		map.set(row.currency, entry);
+		return map;
+	}, new Map<string, { count: number; amount: number }>());
+}
+
 function normalizeTransactionRows(
 	snapshot: ZenMoneySnapshot,
 	selectedAccounts: ResolvedAccount[],
@@ -388,7 +405,7 @@ function normalizeTransactionRows(
 				: selected.currency;
 			const transactionType = transaction.hold
 				? "hold"
-				: counterpartAccount
+				: isZenMoneyTransfer(transaction)
 					? "transfer"
 					: direction;
 			const reference = transaction.id || `${selected.account.id}:${transaction.date}:${amount}`;
@@ -527,6 +544,7 @@ function formatTransactionsSummary(
 		map.set(row.currency, entry);
 		return map;
 	}, new Map<string, CurrencyTotals>());
+	const clearSpendingByCurrency = summarizeClearSpending(rows);
 
 	const lines: string[] = [
 		"# ZenMoney Transactions",
@@ -546,6 +564,23 @@ function formatTransactionsSummary(
 			.forEach(([currency, totals]) => {
 				lines.push(
 					`- ${currency}: income ${formatMoney(totals.income, currency)}, outcome ${formatMoney(totals.outcome, currency)}, net ${formatMoney(totals.net, currency)}`,
+				);
+			});
+		lines.push("");
+	}
+
+	if (clearSpendingByCurrency.size > 0) {
+		lines.push(
+			"## Clear spending",
+			"",
+			"Only rows classified as `outcome` are counted here; transfers and holds are excluded.",
+			"",
+		);
+		[...clearSpendingByCurrency.entries()]
+			.sort(([left], [right]) => left.localeCompare(right))
+			.forEach(([currency, totals]) => {
+				lines.push(
+					`- ${currency}: ${formatMoney(totals.amount, currency)} across ${totals.count} transactions`,
 				);
 			});
 		lines.push("");

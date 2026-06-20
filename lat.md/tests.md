@@ -58,6 +58,10 @@ Ctrl+C and empty-search Escape should discard draft changes and leave the profil
 
 Opening `/zenmoney` should show the current entity balance inline by default, and the displayed totals should update when profile or account selections change.
 
+## Clear spending classification
+
+Transaction summaries should count only `outcome` rows as clear spending, so transfers and hold rows do not inflate expense totals.
+
 ## Snapshot path editing
 
 Editing the hub's snapshot path should preserve relative-path validation and fall back to the entity snapshot folder when the field is reset.
