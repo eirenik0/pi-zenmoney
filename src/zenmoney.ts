@@ -3,7 +3,7 @@ import { isAbsolute, join, normalize } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import type { Theme } from "@earendil-works/pi-tui";
-import { Markdown, Text } from "@earendil-works/pi-tui";
+import { Markdown, matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Data, Effect, Either } from "effect";
 import { Type } from "typebox";
 
@@ -39,6 +39,18 @@ type CommandContext = {
 	ui: {
 		notify(message: string, level: string): void;
 	};
+};
+
+interface ZenMoneyWorkingProfile {
+	entity: string;
+	policy: ZenMoneyEntityPolicy;
+	policyPath: string;
+}
+
+type ZenMoneyProfileEditResult = {
+	entity: string;
+	selectors: string[];
+	snapshotPath?: string;
 };
 
 function runZenMoneyBoundary(
@@ -97,6 +109,31 @@ function normalizeText(value: string): string {
 
 function normalizeDigits(value: string): string {
 	return value.replace(/\D+/g, "");
+}
+
+function matchesSearchQuery(query: string, values: string[]): boolean {
+	const normalizedQuery = normalizeText(query);
+	const digitQuery = normalizeDigits(query);
+	return values.some((value) => {
+		const normalizedValue = normalizeText(value);
+		if (normalizedQuery && normalizedValue.includes(normalizedQuery)) return true;
+		if (digitQuery && normalizeDigits(value).includes(digitQuery)) return true;
+		return false;
+	});
+}
+
+function isReturnInput(data: string): boolean {
+	return matchesKey(data, "enter") || matchesKey(data, "return");
+}
+
+function isSpaceInput(data: string): boolean {
+	return data === " " || matchesKey(data, "space");
+}
+
+function isPrintableSearchInput(data: string): boolean {
+	return (
+		data.length === 1 && data !== " " && data.charCodeAt(0) >= 32 && data.charCodeAt(0) !== 127
+	);
 }
 
 function trimText(text: string, maxLines = 120, maxChars = 12000): string {
@@ -460,6 +497,20 @@ function resolveSelectedAccounts(
 	return matches;
 }
 
+function matchingAccountIdsBySelectors(
+	accounts: ResolvedAccount[],
+	selectors: string[],
+): Set<string> {
+	const trimmed = selectors.map((selector) => selector.trim()).filter(Boolean);
+	if (trimmed.length === 0) return new Set();
+
+	return new Set(
+		accounts
+			.filter((entry) => trimmed.some((selector) => accountMatchesSelector(entry, selector)))
+			.map((entry) => entry.account.id),
+	);
+}
+
 function formatAccountsSummary(accounts: ResolvedAccount[], query?: string): string {
 	const lines: string[] = [
 		"# ZenMoney Accounts",
@@ -608,12 +659,22 @@ function normalizeZenMoneyEntity(entity?: string): string {
 	return normalized || "default";
 }
 
-function entityPolicyPath(entity: string): string {
-	return join("ZenMoney", "Entities", normalizeZenMoneyEntity(entity), "entity-policy.json");
+function zenMoneyEntitiesRoot(cwd: string): string {
+	return join(cwd, "ZenMoney", "Entities");
 }
 
-function entitySnapshotsDir(entity: string): string {
-	return join("ZenMoney", "Entities", normalizeZenMoneyEntity(entity), "Snapshots");
+function entityPolicyPath(entity: string, baseDir = ""): string {
+	return join(
+		baseDir,
+		"ZenMoney",
+		"Entities",
+		normalizeZenMoneyEntity(entity),
+		"entity-policy.json",
+	);
+}
+
+function entitySnapshotsDir(entity: string, baseDir = ""): string {
+	return join(baseDir, "ZenMoney", "Entities", normalizeZenMoneyEntity(entity), "Snapshots");
 }
 
 function normalizeZenMoneySnapshotPath(pathValue: string, label: string): string {
@@ -633,6 +694,58 @@ function normalizeZenMoneySnapshotPath(pathValue: string, label: string): string
 
 async function readZenMoneyEntityPolicy(entity: string): Promise<ZenMoneyEntityPolicy> {
 	return (await readJsonObject<ZenMoneyEntityPolicy>(entityPolicyPath(entity))) ?? {};
+}
+
+async function readZenMoneyEntityPolicyAt(
+	cwd: string,
+	entity: string,
+): Promise<ZenMoneyEntityPolicy> {
+	return (await readJsonObject<ZenMoneyEntityPolicy>(entityPolicyPath(entity, cwd))) ?? {};
+}
+
+async function writeZenMoneyEntityPolicyAt(
+	cwd: string,
+	entity: string,
+	policy: ZenMoneyEntityPolicy,
+): Promise<string> {
+	const policyPath = entityPolicyPath(entity, cwd);
+	await fs.mkdir(join(cwd, "ZenMoney", "Entities", normalizeZenMoneyEntity(entity)), {
+		recursive: true,
+	});
+	await fs.writeFile(policyPath, `${JSON.stringify(policy, null, 2)}\n`, "utf8");
+	return policyPath;
+}
+
+async function listZenMoneyWorkingProfiles(cwd: string): Promise<ZenMoneyWorkingProfile[]> {
+	const profiles = new Map<string, ZenMoneyWorkingProfile>();
+	const root = zenMoneyEntitiesRoot(cwd);
+
+	try {
+		const entries = await fs.readdir(root, { withFileTypes: true });
+		for (const entry of entries) {
+			if (!entry.isDirectory()) continue;
+			const entity = normalizeZenMoneyEntity(entry.name);
+			profiles.set(entity, {
+				entity,
+				policy: await readZenMoneyEntityPolicyAt(cwd, entity),
+				policyPath: entityPolicyPath(entity, cwd),
+			});
+		}
+	} catch (error) {
+		const code = (error as { code?: string }).code;
+		if (code !== "ENOENT") throw error;
+	}
+
+	const defaultEntity = normalizeZenMoneyEntity("default");
+	if (!profiles.has(defaultEntity)) {
+		profiles.set(defaultEntity, {
+			entity: defaultEntity,
+			policy: await readZenMoneyEntityPolicyAt(cwd, defaultEntity),
+			policyPath: entityPolicyPath(defaultEntity, cwd),
+		});
+	}
+
+	return [...profiles.values()].sort((left, right) => left.entity.localeCompare(right.entity));
 }
 
 function resolveZenMoneySnapshotSelectors(
@@ -982,6 +1095,427 @@ async function listZenMoneyAccounts(
 	return { summary: formatAccountsSummary(accounts, query), accounts };
 }
 
+class ZenMoneyProfileEditor {
+	private mode: "profiles" | "accounts" = "profiles";
+	private selectedProfileEntity: string;
+	private selectedAccountId: string | null;
+	private selectedAccountIds = new Set<string>();
+	private profileSearchQuery = "";
+	private accountSearchQuery = "";
+
+	constructor(
+		private readonly tui: { requestRender(): void },
+		private readonly theme: Theme,
+		private readonly done: (result: ZenMoneyProfileEditResult | null) => void,
+		private readonly profiles: ZenMoneyWorkingProfile[],
+		private readonly accounts: ResolvedAccount[],
+	) {
+		const firstProfile = this.profiles[0];
+		if (!firstProfile) throw new Error("No ZenMoney profiles available.");
+		this.selectedProfileEntity = firstProfile.entity;
+		this.selectedAccountId = this.accounts[0]?.account.id ?? null;
+		this.syncProfileSelection();
+	}
+
+	private refresh(): void {
+		this.tui.requestRender();
+	}
+
+	private currentProfile(): ZenMoneyWorkingProfile {
+		const profile = this.profiles.find((entry) => entry.entity === this.selectedProfileEntity);
+		if (profile) return profile;
+		const firstProfile = this.profiles[0];
+		if (!firstProfile) throw new Error("No ZenMoney profiles available.");
+		return firstProfile;
+	}
+
+	private filteredProfiles(): ZenMoneyWorkingProfile[] {
+		const query = this.profileSearchQuery.trim();
+		if (!query) return this.profiles;
+		return this.profiles.filter((profile) => this.profileMatchesQuery(profile, query));
+	}
+
+	private filteredAccounts(): ResolvedAccount[] {
+		const query = this.accountSearchQuery.trim();
+		if (!query) return this.accounts;
+		return this.accounts.filter((account) => this.accountMatchesQuery(account, query));
+	}
+
+	private profileMatchesQuery(profile: ZenMoneyWorkingProfile, query: string): boolean {
+		return matchesSearchQuery(query, [
+			profile.entity,
+			profile.policy.snapshot_path ?? "",
+			(profile.policy.selectors ?? []).join(" "),
+		]);
+	}
+
+	private accountMatchesQuery(account: ResolvedAccount, query: string): boolean {
+		return matchesSearchQuery(query, [
+			account.account.id,
+			account.account.title ?? "",
+			account.company,
+			account.currency,
+			(account.account.syncID ?? []).join(" "),
+			String(account.account.balance ?? ""),
+			account.account.archive ? "archived" : "active",
+		]);
+	}
+
+	private profileSummary(profile: ZenMoneyWorkingProfile): string {
+		const selectedCount = matchingAccountIdsBySelectors(
+			this.accounts,
+			profile.policy.selectors ?? [],
+		).size;
+		const snapshotPath = profile.policy.snapshot_path || entitySnapshotsDir(profile.entity);
+		return `${selectedCount} selected • ${snapshotPath}`;
+	}
+
+	private visibleProfileIndex(): number {
+		const visible = this.filteredProfiles();
+		if (visible.length === 0) return 0;
+		const currentIndex = visible.findIndex(
+			(profile) => profile.entity === this.selectedProfileEntity,
+		);
+		return currentIndex >= 0 ? currentIndex : 0;
+	}
+
+	private visibleAccountIndex(): number {
+		const visible = this.filteredAccounts();
+		if (visible.length === 0) return 0;
+		const currentIndex = visible.findIndex((entry) => entry.account.id === this.selectedAccountId);
+		return currentIndex >= 0 ? currentIndex : 0;
+	}
+
+	private windowRange(total: number, cursor: number, size: number): [number, number] {
+		if (total <= size) return [0, total];
+		const half = Math.floor(size / 2);
+		const start = Math.max(0, Math.min(total - size, cursor - half));
+		return [start, Math.min(total, start + size)];
+	}
+
+	private currentVisibleAccount(): ResolvedAccount | undefined {
+		const visible = this.filteredAccounts();
+		return visible[this.visibleAccountIndex()];
+	}
+
+	private syncProfileSelection(): void {
+		const profile = this.currentProfile();
+		this.selectedAccountIds = matchingAccountIdsBySelectors(
+			this.accounts,
+			profile.policy.selectors ?? [],
+		);
+		const visibleAccounts = this.filteredAccounts();
+		const selectedVisibleAccount =
+			visibleAccounts.find((entry) => this.selectedAccountIds.has(entry.account.id)) ??
+			visibleAccounts[0] ??
+			this.accounts.find((entry) => this.selectedAccountIds.has(entry.account.id)) ??
+			this.accounts[0];
+		this.selectedAccountId = selectedVisibleAccount?.account.id ?? null;
+	}
+
+	private ensureProfileSelectionVisible(): void {
+		const visible = this.filteredProfiles();
+		if (visible.length === 0) return;
+		if (!visible.some((profile) => profile.entity === this.selectedProfileEntity)) {
+			this.selectedProfileEntity = visible[0].entity;
+			this.syncProfileSelection();
+		}
+	}
+
+	private ensureAccountSelectionVisible(): void {
+		const visible = this.filteredAccounts();
+		if (visible.length === 0) return;
+		if (!visible.some((entry) => entry.account.id === this.selectedAccountId)) {
+			this.selectedAccountId = visible[0].account.id;
+		}
+	}
+
+	private selectProfileByIndex(index: number): void {
+		const profile = this.filteredProfiles()[index];
+		if (!profile) return;
+		this.selectedProfileEntity = profile.entity;
+		this.syncProfileSelection();
+		this.refresh();
+	}
+
+	private moveProfile(delta: number): void {
+		const visible = this.filteredProfiles();
+		if (visible.length === 0) return;
+		const nextIndex = Math.max(0, Math.min(visible.length - 1, this.visibleProfileIndex() + delta));
+		this.selectProfileByIndex(nextIndex);
+	}
+
+	private moveAccount(delta: number): void {
+		const visible = this.filteredAccounts();
+		if (visible.length === 0) return;
+		const nextIndex = Math.max(0, Math.min(visible.length - 1, this.visibleAccountIndex() + delta));
+		const account = visible[nextIndex];
+		if (!account) return;
+		this.selectedAccountId = account.account.id;
+		this.refresh();
+	}
+
+	private toggleSelectedAccount(): void {
+		const account = this.currentVisibleAccount();
+		if (!account) return;
+		const id = account.account.id;
+		if (this.selectedAccountIds.has(id)) this.selectedAccountIds.delete(id);
+		else this.selectedAccountIds.add(id);
+	}
+
+	private updateSearchQuery(mode: "profiles" | "accounts", nextValue: string): void {
+		if (mode === "profiles") {
+			this.profileSearchQuery = nextValue;
+			this.ensureProfileSelectionVisible();
+			this.refresh();
+			return;
+		}
+
+		this.accountSearchQuery = nextValue;
+		this.ensureAccountSelectionVisible();
+		this.refresh();
+	}
+
+	private appendSearchText(mode: "profiles" | "accounts", data: string): void {
+		if (!isPrintableSearchInput(data)) return;
+		const current = mode === "profiles" ? this.profileSearchQuery : this.accountSearchQuery;
+		this.updateSearchQuery(mode, `${current}${data}`);
+	}
+
+	private popSearchText(mode: "profiles" | "accounts"): boolean {
+		const current = mode === "profiles" ? this.profileSearchQuery : this.accountSearchQuery;
+		if (!current) return false;
+		this.updateSearchQuery(mode, current.slice(0, -1));
+		return true;
+	}
+
+	private clearSearchText(mode: "profiles" | "accounts"): boolean {
+		const current = mode === "profiles" ? this.profileSearchQuery : this.accountSearchQuery;
+		if (!current) return false;
+		this.updateSearchQuery(mode, "");
+		return true;
+	}
+
+	private searchQuery(mode: "profiles" | "accounts"): string {
+		return mode === "profiles" ? this.profileSearchQuery : this.accountSearchQuery;
+	}
+
+	invalidate(): void {}
+
+	handleInput(data: string): void {
+		if (this.mode === "profiles") {
+			if (matchesKey(data, "escape")) {
+				if (this.clearSearchText("profiles")) return;
+				this.done(null);
+				return;
+			}
+			if (matchesKey(data, "ctrl+c")) {
+				this.done(null);
+				return;
+			}
+			if (matchesKey(data, "backspace") || matchesKey(data, "delete")) {
+				if (this.popSearchText("profiles")) return;
+				return;
+			}
+			if (matchesKey(data, "up")) {
+				this.moveProfile(-1);
+				return;
+			}
+			if (matchesKey(data, "down")) {
+				this.moveProfile(1);
+				return;
+			}
+			if (isReturnInput(data)) {
+				this.mode = "accounts";
+				this.ensureAccountSelectionVisible();
+				this.refresh();
+				return;
+			}
+			this.appendSearchText("profiles", data);
+			return;
+		}
+
+		if (matchesKey(data, "escape")) {
+			if (this.clearSearchText("accounts")) return;
+			this.mode = "profiles";
+			this.refresh();
+			return;
+		}
+		if (matchesKey(data, "ctrl+c")) {
+			this.done(null);
+			return;
+		}
+		if (matchesKey(data, "backspace") || matchesKey(data, "delete")) {
+			if (this.popSearchText("accounts")) return;
+			return;
+		}
+		if (matchesKey(data, "up")) {
+			this.moveAccount(-1);
+			return;
+		}
+		if (matchesKey(data, "down")) {
+			this.moveAccount(1);
+			return;
+		}
+		if (isSpaceInput(data)) {
+			this.toggleSelectedAccount();
+			this.refresh();
+			return;
+		}
+		if (isReturnInput(data)) {
+			if (this.selectedAccountIds.size === 0) return;
+			const profile = this.currentProfile();
+			this.done({
+				entity: profile.entity,
+				selectors: [...this.selectedAccountIds].sort((left, right) => left.localeCompare(right)),
+				snapshotPath: profile.policy.snapshot_path,
+			});
+			return;
+		}
+		this.appendSearchText("accounts", data);
+	}
+
+	render(width: number): string[] {
+		const innerWidth = Math.max(20, width - 2);
+		const panel = (content: string) => truncateToWidth(content, innerWidth, "...", true);
+		const border = (value: string) => this.theme.fg("border", value);
+		const lines: string[] = [];
+		const profile = this.currentProfile();
+		const visibleProfiles = this.filteredProfiles();
+		const visibleAccounts = this.filteredAccounts();
+		const profileIndex = this.visibleProfileIndex();
+		const accountIndex = this.visibleAccountIndex();
+		const profilesWindow = this.windowRange(visibleProfiles.length, profileIndex, 5);
+		const accountsWindow = this.windowRange(visibleAccounts.length, accountIndex, 8);
+
+		lines.push(border(`╭${"─".repeat(innerWidth)}╮`));
+		lines.push(
+			border("│") + panel(this.theme.fg("accent", " ZenMoney Working Profiles")) + border("│"),
+		);
+		lines.push(border("├") + border("─".repeat(innerWidth)) + border("┤"));
+		lines.push(
+			border("│") +
+				panel(
+					this.theme.fg(
+						"dim",
+						` mode: ${this.mode} • search: ${this.searchQuery(this.mode) || "—"} • type to filter • esc clears/back`,
+					),
+				) +
+				border("│"),
+		);
+		lines.push(border("├") + border("─".repeat(innerWidth)) + border("┤"));
+		lines.push(
+			border("│") +
+				panel(
+					this.theme.fg("accent", ` Profiles (${visibleProfiles.length}/${this.profiles.length})`),
+				) +
+				border("│"),
+		);
+
+		if (visibleProfiles.length === 0) {
+			lines.push(
+				border("│") +
+					panel(
+						this.theme.fg(
+							"dim",
+							` no profiles match ${this.profileSearchQuery || "the current filter"}`,
+						),
+					) +
+					border("│"),
+			);
+		} else {
+			for (let index = profilesWindow[0]; index < profilesWindow[1]; index += 1) {
+				const entry = visibleProfiles[index];
+				if (!entry) continue;
+				const isSelected = entry.entity === this.selectedProfileEntity;
+				const prefix = isSelected ? this.theme.fg("accent", "▶ ") : "  ";
+				const name = isSelected ? this.theme.fg("accent", entry.entity) : entry.entity;
+				const summary = this.profileSummary(entry);
+				lines.push(border("│") + panel(`${prefix}${name} — ${summary}`) + border("│"));
+			}
+		}
+
+		lines.push(border("├") + border("─".repeat(innerWidth)) + border("┤"));
+		lines.push(
+			border("│") + panel(this.theme.fg("accent", ` Accounts for ${profile.entity}`)) + border("│"),
+		);
+		lines.push(
+			border("│") +
+				panel(
+					this.theme.fg(
+						"dim",
+						` snapshot: ${profile.policy.snapshot_path || entitySnapshotsDir(profile.entity)}`,
+					),
+				) +
+				border("│"),
+		);
+		lines.push(
+			border("│") +
+				panel(
+					this.theme.fg(
+						"dim",
+						` accounts search: ${this.accountSearchQuery || "—"} • selected: ${this.selectedAccountIds.size}`,
+					),
+				) +
+				border("│"),
+		);
+
+		if (visibleAccounts.length === 0) {
+			lines.push(
+				border("│") +
+					panel(
+						this.theme.fg(
+							"dim",
+							` no accounts match ${this.accountSearchQuery || "the current filter"}`,
+						),
+					) +
+					border("│"),
+			);
+		} else {
+			for (let index = accountsWindow[0]; index < accountsWindow[1]; index += 1) {
+				const entry = visibleAccounts[index];
+				if (!entry) continue;
+				const isSelected = entry.account.id === this.selectedAccountId;
+				const isChecked = this.selectedAccountIds.has(entry.account.id);
+				const prefix = isSelected ? this.theme.fg("accent", "▶ ") : "  ";
+				const check = isChecked ? this.theme.fg("success", "[x]") : this.theme.fg("dim", "[ ]");
+				const label = entry.account.title || entry.account.id;
+				const detail = `${label} · ${entry.company} · ${entry.currency}`;
+				lines.push(
+					border("│") +
+						panel(`${prefix}${check} ${isSelected ? this.theme.fg("accent", detail) : detail}`) +
+						border("│"),
+				);
+			}
+		}
+
+		lines.push(border("├") + border("─".repeat(innerWidth)) + border("┤"));
+		lines.push(
+			border("│") +
+				panel(
+					this.theme.fg(
+						"dim",
+						" Profiles: type to filter • ↑↓ move • Enter accounts • Esc clear/exit",
+					),
+				) +
+				border("│"),
+		);
+		lines.push(
+			border("│") +
+				panel(
+					this.theme.fg(
+						"dim",
+						" Accounts: type to filter • ↑↓ move • Space toggle • Enter save • Esc clear/back",
+					),
+				) +
+				border("│"),
+		);
+		lines.push(border(`╰${"─".repeat(innerWidth)}╯`));
+
+		return lines;
+	}
+}
+
 async function sendZenMoneyReport(pi: ExtensionAPI, title: string, body: string) {
 	pi.sendMessage({
 		customType: "zenmoney-report",
@@ -1012,6 +1546,44 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 							query ? `ZenMoney accounts matching ${query}` : "ZenMoney accounts",
 							result.summary,
 						);
+					});
+				}),
+			),
+	});
+
+	pi.registerCommand("zen-profiles", {
+		description: "Interactively browse ZenMoney profiles and assign current accounts",
+		handler: async (_args: string, ctx: CommandContext) =>
+			runZenMoneyBoundary(
+				ctx,
+				Effect.gen(function* () {
+					const snapshot = yield* effectFromZenMoneyPromise(() => fetchZenMoneySnapshot());
+					const accounts = listSelectableAccounts(snapshot, undefined, true);
+					const profiles = yield* effectFromZenMoneyPromise(() =>
+						listZenMoneyWorkingProfiles(ctx.cwd),
+					);
+					const result = yield* effectFromZenMoneyPromise(() =>
+						ctx.ui.custom<ZenMoneyProfileEditResult | null>(
+							(tui, theme, _kb, done) =>
+								new ZenMoneyProfileEditor(tui, theme, done, profiles, accounts),
+							{ overlay: true },
+						),
+					);
+
+					if (!result) return;
+
+					const currentProfile =
+						profiles.find((profile) => profile.entity === result.entity) ?? profiles[0];
+					const saved = yield* effectFromZenMoneyPromise(() =>
+						writeZenMoneyEntityPolicyAt(ctx.cwd, result.entity, {
+							...(currentProfile?.policy ?? {}),
+							selectors: result.selectors,
+							snapshot_path: result.snapshotPath ?? currentProfile?.policy.snapshot_path,
+						}),
+					);
+
+					yield* Effect.sync(() => {
+						ctx.ui.notify(`Saved ZenMoney profile ${result.entity} to ${saved}`, "info");
 					});
 				}),
 			),
