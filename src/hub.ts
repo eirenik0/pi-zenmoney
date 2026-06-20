@@ -2,11 +2,19 @@ import type { Theme } from "@earendil-works/pi-tui";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import type { ResolvedAccount, ZenMoneyEntityPolicy } from "./types.ts";
 
-type ZenMoneyHubResult = {
-	entity: string;
-	selectors: string[];
-	snapshotPath: string;
-};
+export type ZenMoneyHubResult =
+	| {
+			kind: "save";
+			entity: string;
+			selectors: string[];
+			snapshotPath: string;
+	  }
+	| {
+			kind: "balance";
+			entity: string;
+			selectors: string[];
+			snapshotPath: string;
+	  };
 
 interface ZenMoneyWorkingProfile {
 	entity: string;
@@ -175,6 +183,29 @@ export class ZenMoneyHubEditor {
 		return normalizeZenMoneySnapshotPath(this.currentSnapshotPath(), "Snapshot path");
 	}
 
+	private selectedSelectors(): string[] {
+		return [...this.selectedAccountIds].sort((left, right) => left.localeCompare(right));
+	}
+
+	private submit(kind: ZenMoneyHubResult["kind"]): void {
+		if (this.selectedAccountIds.size === 0) {
+			this.errorMessage = "Select at least one account before continuing.";
+			this.refresh();
+			return;
+		}
+		try {
+			this.done({
+				kind,
+				entity: this.currentProfile().entity,
+				selectors: this.selectedSelectors(),
+				snapshotPath: this.resolvedSnapshotPath(),
+			});
+		} catch (error) {
+			this.errorMessage = error instanceof Error ? error.message : String(error);
+			this.refresh();
+		}
+	}
+
 	private profileSnapshotPath(profile: ZenMoneyWorkingProfile): string {
 		return profile.policy.snapshot_path || entitySnapshotsDir(profile.entity);
 	}
@@ -228,6 +259,25 @@ export class ZenMoneyHubEditor {
 		).size;
 		const snapshotPath = this.profileSnapshotPath(profile);
 		return `${selectedCount} selected • ${snapshotPath}`;
+	}
+
+	private selectedAccountEntries(): ResolvedAccount[] {
+		return this.allAccounts.filter((entry) => this.selectedAccountIds.has(entry.account.id));
+	}
+
+	private selectedBalanceSummary(): string {
+		if (this.selectedAccountIds.size === 0) return "select accounts to show balance";
+		const balances = this.selectedAccountEntries().reduce((map, entry) => {
+			const value = entry.account.balance;
+			if (value === undefined || value === null || Number.isNaN(value)) return map;
+			map.set(entry.currency, (map.get(entry.currency) ?? 0) + value);
+			return map;
+		}, new Map<string, number>());
+		if (balances.size === 0) return "no current balances available";
+		return [...balances.entries()]
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([currency, balance]) => `${balance.toFixed(2)} ${currency}`)
+			.join(" • ");
 	}
 
 	private selectedProfileTitle(): string {
@@ -432,6 +482,10 @@ export class ZenMoneyHubEditor {
 	invalidate(): void {}
 
 	handleInput(data: string): void {
+		if (matchesKey(data, "ctrl+b")) {
+			this.submit("balance");
+			return;
+		}
 		if (this.mode === "profiles") {
 			if (isTabInput(data)) {
 				this.cycleMode();
@@ -540,18 +594,7 @@ export class ZenMoneyHubEditor {
 			return;
 		}
 		if (isReturnInput(data)) {
-			if (this.selectedAccountIds.size === 0) return;
-			try {
-				const profile = this.currentProfile();
-				this.done({
-					entity: profile.entity,
-					selectors: [...this.selectedAccountIds].sort((left, right) => left.localeCompare(right)),
-					snapshotPath: this.resolvedSnapshotPath(),
-				});
-			} catch (error) {
-				this.errorMessage = error instanceof Error ? error.message : String(error);
-				this.refresh();
-			}
+			this.submit("save");
 			return;
 		}
 		this.appendSnapshotPathText(data);
@@ -580,7 +623,7 @@ export class ZenMoneyHubEditor {
 				panel(
 					this.theme.fg(
 						"dim",
-						` mode: ${this.mode} • tab cycles • enter advances/saves • esc clears/back`,
+						` mode: ${this.mode} • tab cycles • enter saves • balance shown above • esc clears/back`,
 					),
 				) +
 				border("│"),
@@ -593,6 +636,11 @@ export class ZenMoneyHubEditor {
 						` Profile: ${this.selectedProfileTitle()} • accounts: ${this.selectedAccountIds.size} • snapshot: ${this.currentSnapshotPath()}`,
 					),
 				) +
+				border("│"),
+		);
+		lines.push(
+			border("│") +
+				panel(this.theme.fg("accent", ` Balance: ${this.selectedBalanceSummary()}`)) +
 				border("│"),
 		);
 		lines.push(border("├") + border("─".repeat(innerWidth)) + border("┤"));
@@ -732,7 +780,7 @@ export class ZenMoneyHubEditor {
 				panel(
 					this.theme.fg(
 						"dim",
-						" Settings: type to edit path • Enter save • Esc restore/back • Tab next",
+						" Settings: type to edit path • Enter save • balance shown above • Esc restore/back • Tab next",
 					),
 				) +
 				border("│"),

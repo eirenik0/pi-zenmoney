@@ -52,7 +52,11 @@ Ctrl+C and empty-search Escape should discard draft changes and leave the profil
 
 ## Settings hub
 
-`/zenmoney` should open a single hub that exposes profile selection, account selection, and snapshot-path setup without forcing the user into separate commands.
+`/zenmoney` should open a single hub that exposes profile selection, account selection, snapshot-path setup, and balance reporting without forcing the user into separate commands.
+
+## Hub balance display
+
+Opening `/zenmoney` should show the current entity balance inline by default, and the displayed totals should update when profile or account selections change.
 
 ## Snapshot path editing
 

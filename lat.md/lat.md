@@ -6,7 +6,7 @@ This repo packages a Pi extension for ZenMoney account discovery, transaction ex
 
 `package.json` points Pi at the extension entrypoint, and the README documents install, token setup, and the supported ZenMoney command surface.
 
-- `/zenmoney` opens the settings hub for profiles, accounts, and snapshot-path setup.
+- `/zenmoney` opens the settings hub for profiles, accounts, snapshot-path setup, and an inline balance summary.
 - `/zen-accounts` lists selectable ZenMoney accounts.
 - `/zen-profiles` remains a compatibility alias for the profile editor.
 - `/zen-transactions` exports normalized transactions for chosen accounts.
@@ -51,5 +51,7 @@ Resolves raw tokens and `op://` / `op read` secret references before any ZenMone
 Account selectors match id, title, company, syncID, or last digits. Snapshot exports can use `--entity` and `--snapshot-path`, and the path must stay relative to working files.
 
 The `/zen-profiles` command opens a TUI for browsing profiles and current accounts with separate live search filters; archived accounts are hidden by default, typing a new name can create a profile, space toggles the highlighted account, and enter saves the chosen selectors back to the profile policy.
+
+The `/zenmoney` hub shows an inline balance summary for the currently selected entity and accounts, reusing the same selector and snapshot-path state.
 
 By default, snapshots still land under `ZenMoney/Entities/<entity>/Snapshots`, and selectors can fall back to entity policy or `ZENMONEY_SNAPSHOT_SELECTORS`.
