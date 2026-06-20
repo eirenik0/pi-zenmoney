@@ -50,6 +50,14 @@ Saving from the editor should persist selected account ids to the chosen profile
 
 Ctrl+C and empty-search Escape should discard draft changes and leave the profile policy file unchanged.
 
+## Settings hub
+
+`/zenmoney` should open a single hub that exposes profile selection, account selection, and snapshot-path setup without forcing the user into separate commands.
+
+## Snapshot path editing
+
+Editing the hub's snapshot path should preserve relative-path validation and fall back to the entity snapshot folder when the field is reset.
+
 ## Profile enter flow
 
 Enter or Return should move from profiles into accounts or create a new draft profile when the search text does not match an existing entity, then save selected account ids from the account pane.

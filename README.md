@@ -5,7 +5,8 @@ ZenMoney Pi package for account discovery, transaction export, and entity-scoped
 ## Use cases
 
 - `/zen-accounts [query]` — list ZenMoney accounts for explicit selection; archived accounts are hidden by default.
-- `/zen-profiles` — interactively browse working profiles and current accounts, with live search filtering; archived accounts are hidden by default, and typing a new name lets you create a profile.
+- `/zenmoney` — open the ZenMoney settings hub for profiles, accounts, and snapshot-path setup.
+- `/zen-profiles` — legacy alias for profile/account editing; typing a new name lets you create a profile.
 - `/zen-transactions <selector[,selector...]> [YYYY-MM]` — export transactions for selected accounts.
 - `/zen-balance [--entity <name>] [--snapshot-path <relative/path>] [selector[,selector...]] [YYYY-MM] [--store]` — summarize balances and monthly totals; `--save` also works.
 
@@ -50,6 +51,6 @@ If you only need an API token, the ZenMoney wiki notes that you can get one with
 ## Notes
 
 - Project-local extension entrypoint: `src/index.ts`
-- Extension logic: `src/zenmoney.ts`
+- Extension logic: `src/zenmoney.ts`, `src/hub.ts`
 - Secret reference helper: `src/secret-refs.ts`
 - Entity snapshots default to `ZenMoney/Entities/<entity>/Snapshots/` unless overridden by a relative path

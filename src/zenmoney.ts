@@ -8,6 +8,7 @@ import { Data, Effect, Either } from "effect";
 import { Type } from "typebox";
 
 import { PREVIEW_LINES } from "./constants.ts";
+import { ZenMoneyHubEditor } from "./hub.ts";
 import { resolveSecretReference } from "./secret-refs.ts";
 import type {
 	BankTransactionRow,
@@ -1598,6 +1599,44 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 		(message: { content: string }, { expanded }: { expanded: boolean }, theme: Theme) =>
 			renderPreview(message.content, expanded, theme),
 	);
+
+	pi.registerCommand("zenmoney", {
+		description: "Open the ZenMoney settings hub",
+		handler: async (_args: string, ctx: CommandContext) =>
+			runZenMoneyBoundary(
+				ctx,
+				Effect.gen(function* () {
+					const snapshot = yield* effectFromZenMoneyPromise(() => fetchZenMoneySnapshot());
+					const accounts = listSelectableAccounts(snapshot, undefined, false);
+					const allAccounts = listSelectableAccounts(snapshot, undefined, true);
+					const profiles = yield* effectFromZenMoneyPromise(() =>
+						listZenMoneyWorkingProfiles(ctx.cwd),
+					);
+					const result = yield* effectFromZenMoneyPromise(() =>
+						ctx.ui.custom<{ entity: string; selectors: string[]; snapshotPath: string } | null>(
+							(tui, theme, _kb, done) =>
+								new ZenMoneyHubEditor(tui, theme, done, profiles, accounts, allAccounts),
+							{ overlay: true },
+						),
+					);
+
+					if (!result) return;
+
+					const currentProfile = profiles.find((profile) => profile.entity === result.entity);
+					const saved = yield* effectFromZenMoneyPromise(() =>
+						writeZenMoneyEntityPolicyAt(ctx.cwd, result.entity, {
+							...(currentProfile?.policy ?? {}),
+							selectors: result.selectors,
+							snapshot_path: result.snapshotPath,
+						}),
+					);
+
+					yield* Effect.sync(() => {
+						ctx.ui.notify(`Saved ZenMoney settings for ${result.entity} to ${saved}`, "info");
+					});
+				}),
+			),
+	});
 
 	pi.registerCommand("zen-accounts", {
 		description: "List ZenMoney accounts available for explicit selection",

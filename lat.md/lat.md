@@ -4,10 +4,11 @@ This repo packages a Pi extension for ZenMoney account discovery, transaction ex
 
 ## Repository overview
 
-`package.json` points Pi at the extension entrypoint, and the README documents install, token setup, and the three supported user commands.
+`package.json` points Pi at the extension entrypoint, and the README documents install, token setup, and the supported ZenMoney command surface.
 
+- `/zenmoney` opens the settings hub for profiles, accounts, and snapshot-path setup.
 - `/zen-accounts` lists selectable ZenMoney accounts.
-- `/zen-profiles` opens the interactive profile editor with separate live search filters for profiles and accounts.
+- `/zen-profiles` remains a compatibility alias for the profile editor.
 - `/zen-transactions` exports normalized transactions for chosen accounts.
 - `/zen-balance` summarizes balances and monthly totals per entity.
 
@@ -21,7 +22,7 @@ This index points to the two topic files that `lat_check` expects this package t
 
 ## Source layout
 
-The source is split into a thin entrypoint, the ZenMoney command/tool implementation, and small shared modules for constants, types, and secret resolution.
+The source is split into a thin entrypoint, the ZenMoney command/tool implementation, the unified settings hub, and small shared modules for constants, types, and secret resolution.
 
 ### `src/index.ts`
 
@@ -32,6 +33,10 @@ Thin adapter that hands Pi's extension API to [[src/zenmoney.ts#registerZenMoney
 Contains the command and tool registrations plus the core data flow: snapshot fetch, account matching, transaction normalization, and balance snapshots.
 
 Key helpers: [[src/zenmoney.ts#fetchZenMoneySnapshot]], [[src/zenmoney.ts#listZenMoneyAccounts]], [[src/zenmoney.ts#readZenMoneyTransactions]], [[src/zenmoney.ts#readZenMoneyBalanceSnapshot]], [[src/zenmoney.ts#storeZenMoneyBalanceSnapshot]].
+
+### `src/hub.ts`
+
+Implements the unified settings TUI for selecting profiles, selecting accounts, and editing snapshot paths before saving entity policy changes.
 
 ### `src/constants.ts` and `src/types.ts`
 
