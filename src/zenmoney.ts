@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { basename, join } from "node:path";
+import { isAbsolute, join, normalize } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import type { Theme } from "@earendil-works/pi-tui";
@@ -7,7 +7,7 @@ import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Data, Effect, Either } from "effect";
 import { Type } from "typebox";
 
-import { PREVIEW_LINES, REGISTER_COLUMNS, REGISTER_PRESERVED_FIELDS } from "./constants.ts";
+import { PREVIEW_LINES } from "./constants.ts";
 import { resolveSecretReference } from "./secret-refs.ts";
 import type {
 	BankTransactionRow,
@@ -15,12 +15,10 @@ import type {
 	ResolvedAccount,
 	ZenMoneyAccount,
 	ZenMoneyCategory,
-	ZenMoneyClassificationRules,
 	ZenMoneyCompany,
+	ZenMoneyEntityPolicy,
 	ZenMoneyInstrument,
 	ZenMoneyMerchant,
-	ZenMoneyRegisterPolicy,
-	ZenMoneyRegisterResult,
 	ZenMoneySnapshot,
 	ZenMoneyTransaction,
 } from "./types.ts";
@@ -603,63 +601,54 @@ function makeSelectorSlug(selectors: string[]): string {
 	return normalized || "zenmoney-accounts";
 }
 
-function parseZenMoneyRegisterArgs(raw: string): {
-	selectors: string[];
-	period?: string;
-	write: boolean;
-} {
-	const tokens = tokenizeZenMoneyArgs(raw)
-		.map((token) => token.trim())
-		.filter(Boolean);
-	let write = false;
-	const cleanTokens = tokens.filter((token) => {
-		if (token === "--write") {
-			write = true;
-			return false;
-		}
-		return true;
-	});
-
-	const periodIndex = cleanTokens.findIndex((token) => /^\d{4}-\d{2}$/.test(token));
-	const period = periodIndex >= 0 ? cleanTokens[periodIndex] : undefined;
-	const selectorTokens =
-		periodIndex >= 0
-			? [...cleanTokens.slice(0, periodIndex), ...cleanTokens.slice(periodIndex + 1)]
-			: cleanTokens;
-
-	return {
-		selectors: selectorTokens.length > 0 ? splitSelectors(selectorTokens.join(" ")) : [],
-		period,
-		write,
-	};
+function normalizeZenMoneyEntity(entity?: string): string {
+	const normalized = normalizeText(entity ?? "default")
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/(^-|-$)/g, "");
+	return normalized || "default";
 }
 
-function expectedZenMoneyRegisterPath(year: number): string {
-	return join("ZenMoney", "Registers", `zenmoney-register-${year}.jsonl`);
+function entityPolicyPath(entity: string): string {
+	return join("ZenMoney", "Entities", normalizeZenMoneyEntity(entity), "entity-policy.json");
 }
 
-function zenMoneyRegisterRowId(row: BankTransactionRow): string {
-	return `zenmoney:${row.accountId}:${row.reference}`;
+function entitySnapshotsDir(entity: string): string {
+	return join("ZenMoney", "Entities", normalizeZenMoneyEntity(entity), "Snapshots");
 }
 
-function formatRegisterAmount(value: number): string {
-	return Number.isFinite(value) ? value.toFixed(2) : "";
+function normalizeZenMoneySnapshotPath(pathValue: string, label: string): string {
+	const trimmed = pathValue.trim();
+	if (!trimmed) throw new Error(`${label} must not be empty.`);
+	if (isAbsolute(trimmed))
+		throw new Error(`${label} must be relative to the working files folder.`);
+
+	const normalized = normalize(trimmed).replaceAll("\\", "/");
+	if (!normalized || normalized === ".") throw new Error(`${label} must not be empty.`);
+	if (normalized.split("/").some((segment) => segment === "..")) {
+		throw new Error(`${label} must not escape the working files folder.`);
+	}
+
+	return normalized;
 }
 
-function pathExistsEffect(path: string): Effect.Effect<boolean> {
-	return Effect.map(
-		Effect.either(
-			Effect.tryPromise({
-				try: () => fs.access(path),
-				catch: (cause) => cause,
-			}),
-		),
-		(result) => Either.isRight(result),
+async function readZenMoneyEntityPolicy(entity: string): Promise<ZenMoneyEntityPolicy> {
+	return (await readJsonObject<ZenMoneyEntityPolicy>(entityPolicyPath(entity))) ?? {};
+}
+
+function resolveZenMoneySnapshotSelectors(
+	explicitSelectors: string[],
+	policy: ZenMoneyEntityPolicy,
+	entity: string,
+): string[] {
+	const selectors = explicitSelectors.length > 0 ? explicitSelectors : (policy.selectors ?? []);
+	if (selectors.length > 0) return selectors;
+
+	const envSelectors = process.env.ZENMONEY_SNAPSHOT_SELECTORS?.trim();
+	if (envSelectors) return splitSelectors(envSelectors);
+
+	throw new Error(
+		`No ZenMoney selectors configured for entity \`${entity}\`. Add ${entityPolicyPath(entity)}, set ZENMONEY_SNAPSHOT_SELECTORS, or pass explicit selectors.`,
 	);
-}
-
-async function pathExists(path: string): Promise<boolean> {
-	return Effect.runPromise(pathExistsEffect(path));
 }
 
 function readJsonObjectEffect<T>(path: string): Effect.Effect<T | undefined> {
@@ -689,529 +678,100 @@ async function readJsonObject<T>(path: string): Promise<T | undefined> {
 	return Effect.runPromise(readJsonObjectEffect<T>(path));
 }
 
-async function readZenMoneyRegisterPolicy(): Promise<ZenMoneyRegisterPolicy> {
-	return (
-		(await readJsonObject<ZenMoneyRegisterPolicy>(join("ZenMoney", "register-policy.json"))) ?? {}
-	);
-}
-
-async function readZenMoneyClassificationRules(): Promise<ZenMoneyClassificationRules> {
-	return (
-		(await readJsonObject<ZenMoneyClassificationRules>(
-			join("ZenMoney", "classification-rules.json"),
-		)) ?? {}
-	);
-}
-
-function resolveZenMoneySelectors(
-	explicitSelectors: string[],
-	policy: ZenMoneyRegisterPolicy,
-): string[] {
-	const selectors =
-		explicitSelectors.length > 0 ? explicitSelectors : (policy.register_selectors ?? []);
-	if (selectors.length === 0) {
-		throw new Error(
-			"No ZenMoney selectors configured. Add ZenMoney/register-policy.json or pass explicit selectors.",
-		);
-	}
-
-	return selectors;
-}
-
-function readJsonlRecords(text: string): Array<Record<string, string>> {
-	const rows: Array<Record<string, string>> = [];
-	text.split(/\r?\n/).forEach((line, index) => {
-		if (!line.trim()) return;
-		const parsed = JSON.parse(line) as unknown;
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-			throw new Error(`line ${index + 1}: expected JSON object`);
-		}
-
-		const row: Record<string, string> = {};
-		Object.entries(parsed as Record<string, unknown>).forEach(([key, value]) => {
-			if (value === undefined || value === null) row[key] = "";
-			else if (typeof value === "string") row[key] = value;
-			else if (typeof value === "number" || typeof value === "boolean") row[key] = String(value);
-			else row[key] = JSON.stringify(value);
-		});
-		rows.push(row);
-	});
-	return rows;
-}
-
-async function readZenMoneyRegisterRows(path: string): Promise<Array<Record<string, string>>> {
-	if (!(await pathExists(path))) return [];
-	return readJsonlRecords(await fs.readFile(path, "utf8"));
-}
-
-function orderZenMoneyRegisterRow(row: Record<string, string>): Record<string, string> {
-	const ordered: Record<string, string> = {};
-	REGISTER_COLUMNS.forEach((column) => {
-		if (row[column] !== undefined) ordered[column] = row[column];
-	});
-	Object.keys(row)
-		.filter((key) => !(REGISTER_COLUMNS as readonly string[]).includes(key))
-		.sort()
-		.forEach((key) => {
-			ordered[key] = row[key];
-		});
-	return ordered;
-}
-
-function sortZenMoneyRegisterRows(
-	left: Record<string, string>,
-	right: Record<string, string>,
-): number {
-	const dateCompare = (left.date || "").localeCompare(right.date || "");
-	if (dateCompare !== 0) return dateCompare;
-	const accountCompare = (left.account_title || "").localeCompare(right.account_title || "");
-	if (accountCompare !== 0) return accountCompare;
-	return (left.id || "").localeCompare(right.id || "");
-}
-
-async function writeZenMoneyRegisterRows(
-	path: string,
-	rows: Array<Record<string, string>>,
-): Promise<void> {
-	await fs.mkdir(join("ZenMoney", "Registers"), { recursive: true });
-	const content = rows.map((row) => JSON.stringify(orderZenMoneyRegisterRow(row))).join("\n");
-	await fs.writeFile(path, `${content}${content ? "\n" : ""}`, "utf8");
-}
-
-function buildLinkedTransferMap(rows: BankTransactionRow[]): Map<string, string> {
-	const byReference = new Map<string, BankTransactionRow[]>();
-	rows.forEach((row) => {
-		const group = byReference.get(row.reference) ?? [];
-		group.push(row);
-		byReference.set(row.reference, group);
-	});
-
-	const linked = new Map<string, string>();
-	byReference.forEach((group) => {
-		if (group.length < 2) return;
-		const hasIncome = group.some((row) => row.amount > 0);
-		const hasOutcome = group.some((row) => row.amount < 0);
-		if (!hasIncome || !hasOutcome) return;
-
-		group.forEach((row) => {
-			const id = zenMoneyRegisterRowId(row);
-			linked.set(
-				id,
-				group
-					.filter((candidate) => candidate !== row)
-					.map((candidate) => zenMoneyRegisterRowId(candidate))
-					.join(";"),
-			);
-		});
-	});
-	return linked;
-}
-
-function rowText(row: BankTransactionRow): string {
-	return [row.partner, row.description, row.categoryName ?? ""].filter(Boolean).join(" | ");
-}
-
-function rowMatchesReviewOnlyAccount(
-	row: BankTransactionRow,
-	policy: ZenMoneyRegisterPolicy,
-): boolean {
-	const normalizedPartner = normalizeText(row.partner);
-	return (policy.review_only_selectors ?? []).some((selector) =>
-		normalizedPartner.includes(normalizeText(selector)),
-	);
-}
-
-function classifyZenMoneyRegisterRow(
-	row: BankTransactionRow,
-	linkedTransferId: string | undefined,
-	policy: ZenMoneyRegisterPolicy,
-	rules: ZenMoneyClassificationRules,
-	warnings: string[],
-): Pick<
-	Record<string, string>,
-	"cashflow_bucket" | "cashflow_category" | "review_status" | "classification_source" | "notes"
-> {
-	const text = rowText(row);
-	if (linkedTransferId) {
-		return {
-			cashflow_bucket: "internal_transfer",
-			cashflow_category: "own_account_transfer",
-			review_status: "excluded",
-			classification_source: "transfer_pair",
-			notes: "Paired ZenMoney rows across selected accounts.",
-		};
-	}
-
-	if (rowMatchesReviewOnlyAccount(row, policy)) {
-		return {
-			cashflow_bucket: "manual_review",
-			cashflow_category: "review_only_account_transfer",
-			review_status: "needs_review",
-			classification_source: "account_policy",
-			notes: "Counterparty matches a review-only account selector.",
-		};
-	}
-
-	if (
-		normalizeText(text).includes("to investment account") ||
-		normalizeText(row.categoryName ?? "") === "investment"
-	) {
-		return {
-			cashflow_bucket: "internal_transfer",
-			cashflow_category: "savings_investment",
-			review_status: "excluded",
-			classification_source: "zenmoney_category",
-			notes: "Savings/investment movement outside real spending.",
-		};
-	}
-
-	for (const rule of rules.rules ?? []) {
-		if (!rule.match) continue;
-		const patternResult = Effect.runSync(
-			Effect.either(
-				Effect.try({
-					try: () => new RegExp(rule.match, "i"),
-					catch: (error) => error,
-				}),
-			),
-		);
-		if (Either.isLeft(patternResult)) {
-			const error = patternResult.left;
-			warnings.push(
-				`Skipped invalid ZenMoney classification rule \`${rule.match}\`: ${error instanceof Error ? error.message : String(error)}`,
-			);
-			continue;
-		}
-		const pattern = patternResult.right;
-
-		if (!pattern.test(text)) continue;
-		const bucket = rule.bucket || (row.amount >= 0 ? "real_income" : "real_expense");
-		if (row.amount > 0 && bucket === "real_expense") continue;
-		return {
-			cashflow_bucket: bucket,
-			cashflow_category:
-				rule.category || row.categoryName || (row.amount >= 0 ? "other_income" : "other_zenmoney"),
-			review_status:
-				rule.requires_review || bucket === "manual_review" ? "needs_review" : "auto_classified",
-			classification_source: "classification_rules",
-			notes: rule.note ?? "",
-		};
-	}
-
-	const categoryName = row.categoryName?.trim() || "";
-	const normalizedCategory = normalizeText(categoryName);
-	const refundLike =
-		row.amount > 0 &&
-		(normalizedCategory.includes("refund") ||
-			normalizedCategory.includes("vozvrat") ||
-			normalizedCategory.includes("возврат"));
-	return {
-		cashflow_bucket: row.amount >= 0 ? "real_income" : "real_expense",
-		cashflow_category: refundLike
-			? "refund"
-			: categoryName || (row.amount >= 0 ? "other_income" : "other_zenmoney"),
-		review_status: "auto_classified",
-		classification_source: categoryName ? "zenmoney_category" : "amount_default",
-		notes:
-			row.amount > 0
-				? "Positive external row; monthly reports should confirm whether this is income or a refund/reversal."
-				: "",
-	};
-}
-
-function buildZenMoneyRegisterRows(
-	rows: BankTransactionRow[],
-	accounts: ResolvedAccount[],
-	policy: ZenMoneyRegisterPolicy,
-	rules: ZenMoneyClassificationRules,
-	warnings: string[],
-): Array<Record<string, string>> {
-	const accountCompanyById = new Map(accounts.map((entry) => [entry.account.id, entry.company]));
-	const linkedTransfers = buildLinkedTransferMap(rows);
-
-	return rows.map((row) => {
-		const id = zenMoneyRegisterRowId(row);
-		const linkedTransferId = linkedTransfers.get(id);
-		const classification = classifyZenMoneyRegisterRow(
-			row,
-			linkedTransferId,
-			policy,
-			rules,
-			warnings,
-		);
-		return {
-			id,
-			period: row.date.slice(0, 7),
-			date: row.date,
-			account_id: row.accountId,
-			account_title: row.accountTitle,
-			account_company: accountCompanyById.get(row.accountId) ?? "",
-			currency: row.currency,
-			amount: formatRegisterAmount(row.amount),
-			direction: row.amount >= 0 ? "income" : "outcome",
-			counterparty: row.partner,
-			description: row.description,
-			transaction_type: row.transactionType,
-			reference: row.reference,
-			source: row.source,
-			source_file: row.sourceFile,
-			category_id: row.categoryId ?? "",
-			category_name: row.categoryName ?? "",
-			...classification,
-			linked_transfer_id: linkedTransferId ?? "",
-			evidence_file: "",
-		};
-	});
-}
-
-function mergeZenMoneyRegisterRows(
-	existingRows: Array<Record<string, string>>,
-	generatedRows: Array<Record<string, string>>,
-): { rows: Array<Record<string, string>>; newRows: number; updatedRows: number } {
-	const byId = new Map(existingRows.map((row) => [row.id, row]));
-	let newRows = 0;
-	let updatedRows = 0;
-
-	generatedRows.forEach((generated) => {
-		const existing = byId.get(generated.id);
-		if (!existing) {
-			byId.set(generated.id, generated);
-			newRows += 1;
-			return;
-		}
-
-		const merged = { ...existing, ...generated };
-		REGISTER_PRESERVED_FIELDS.forEach((field) => {
-			if (existing[field]) merged[field] = existing[field];
-		});
-
-		if (
-			JSON.stringify(orderZenMoneyRegisterRow(existing)) !==
-			JSON.stringify(orderZenMoneyRegisterRow(merged))
-		) {
-			updatedRows += 1;
-		}
-		byId.set(generated.id, merged);
-	});
-
-	return { rows: [...byId.values()].sort(sortZenMoneyRegisterRows), newRows, updatedRows };
-}
-
-function formatZenMoneyRegisterSummary(
-	result: Omit<ZenMoneyRegisterResult, "summary">,
-	periodRows: Array<Record<string, string>>,
-	selectors: string[],
-): string {
-	const bucketTotals = periodRows.reduce((map, row) => {
-		const bucket = row.cashflow_bucket || "unclassified";
-		const currency = row.currency || "";
-		const key = `${bucket}|${currency}`;
-		const amount = Number.parseFloat(row.amount || "0") || 0;
-		const totals = map.get(key) ?? { bucket, currency, rows: 0, income: 0, outcome: 0, net: 0 };
-		totals.rows += 1;
-		if (amount >= 0) totals.income += amount;
-		else totals.outcome += Math.abs(amount);
-		totals.net = totals.income - totals.outcome;
-		map.set(key, totals);
-		return map;
-	}, new Map<
-		string,
-		{ bucket: string; currency: string; rows: number; income: number; outcome: number; net: number }
-	>());
-
-	const lines: string[] = [
-		`# ZenMoney Register — ${result.period}`,
-		"",
-		`- Mode: ${result.dryRun ? "dry run (no files written)" : "written"}`,
-		`- Register path: \`${result.registerPath}\``,
-		`- Register file: \`${basename(result.registerPath)}\``,
-		`- Source: ZenMoney API`,
-		`- Account selectors: ${selectors.join(", ")}`,
-		`- Fetched rows for period: ${result.fetchedRows}`,
-		`- Existing rows before merge: ${result.existingRows}`,
-		`- New rows: ${result.newRows}`,
-		`- Updated rows: ${result.updatedRows}`,
-		`- Total rows after merge: ${result.totalRows}`,
-		"",
-		"## Cashflow bucket totals for fetched period",
-		"",
-	];
-
-	if (bucketTotals.size === 0) {
-		lines.push("No rows found for this period.", "");
-	} else {
-		lines.push(
-			"| Bucket | Currency | Rows | Income | Outcome | Net |",
-			"|---|---|---:|---:|---:|---:|",
-		);
-		[...bucketTotals.values()]
-			.sort((left, right) =>
-				`${left.bucket}|${left.currency}`.localeCompare(`${right.bucket}|${right.currency}`),
-			)
-			.forEach((totals) => {
-				lines.push(
-					`| ${totals.bucket} | ${totals.currency || "—"} | ${totals.rows} | ${formatMoney(totals.income, totals.currency)} | ${formatMoney(totals.outcome, totals.currency)} | ${formatMoney(totals.net, totals.currency)} |`,
-				);
-			});
-		lines.push("");
-	}
-
-	const reviewRows = periodRows.filter((row) => row.review_status === "needs_review");
-	if (reviewRows.length > 0) {
-		lines.push(
-			"## Review rows",
-			"",
-			"| Date | Amount | Account | Counterparty | Bucket |",
-			"|---|---:|---|---|---|",
-		);
-		reviewRows.slice(0, 20).forEach((row) => {
-			lines.push(
-				`| ${row.date} | ${formatMoney(Number.parseFloat(row.amount), row.currency)} | ${row.account_title.replace(/\|/g, " ")} | ${(row.counterparty || row.description || "—").replace(/\|/g, " ")} | ${row.cashflow_bucket} |`,
-			);
-		});
-		if (reviewRows.length > 20)
-			lines.push(`| … | … | … | … | ${reviewRows.length - 20} more rows |`);
-		lines.push("");
-	}
-
-	if (result.warnings.length > 0) {
-		lines.push("## Warnings", "");
-		for (const warning of [...new Set(result.warnings)]) lines.push(`- ${warning}`);
-		lines.push("");
-	}
-
-	lines.push(
-		"Generated rows keep one ZenMoney account-side transaction per JSONL line. Reports should read this register as the canonical transaction base and use CSV snapshots only as reproducible extracts.",
-	);
-	return lines.join("\n");
-}
-
-// @lat: [[data-workflows#Data Workflows#ZenMoney Transaction Register]]
-async function prepareZenMoneyRegister(params: {
-	period: string;
-	selectors?: string[];
-	write?: boolean;
-}): Promise<ZenMoneyRegisterResult> {
-	const period = parseMonthPeriod(params.period);
-	if (!period) throw new Error(`Invalid period \`${params.period}\`. Expected format: YYYY-MM.`);
-
-	const year = Number.parseInt(period.slice(0, 4), 10);
-	const policy = await readZenMoneyRegisterPolicy();
-	const rules = await readZenMoneyClassificationRules();
-	const selectors = resolveZenMoneySelectors(params.selectors ?? [], policy);
-	const registerPath = expectedZenMoneyRegisterPath(year);
-	const warnings: string[] = [];
-
-	const source = await readZenMoneyTransactions(selectors, period);
-	const generatedRows = buildZenMoneyRegisterRows(
-		source.transactions,
-		source.accounts,
-		policy,
-		rules,
-		warnings,
-	);
-	const existingRows = await readZenMoneyRegisterRows(registerPath);
-	const merged = mergeZenMoneyRegisterRows(existingRows, generatedRows);
-
-	if (params.write) await writeZenMoneyRegisterRows(registerPath, merged.rows);
-
-	const resultWithoutSummary: Omit<ZenMoneyRegisterResult, "summary"> = {
-		period,
-		registerPath,
-		dryRun: !params.write,
-		fetchedRows: generatedRows.length,
-		existingRows: existingRows.length,
-		newRows: merged.newRows,
-		updatedRows: merged.updatedRows,
-		totalRows: merged.rows.length,
-		warnings,
-	};
-
-	return {
-		...resultWithoutSummary,
-		summary: formatZenMoneyRegisterSummary(resultWithoutSummary, generatedRows, selectors),
-	};
-}
-
 function parseZenMoneyBalanceArgs(raw: string): {
+	entity: string;
 	selectors: string[];
 	period?: string;
+	snapshotPath?: string;
 	store: boolean;
 } {
 	const tokens = tokenizeZenMoneyArgs(raw)
 		.map((token) => token.trim())
 		.filter(Boolean);
 	let store = false;
-	const cleanTokens = tokens.filter((token) => {
-		if (token === "--store") return false;
+	let entity = "default";
+	let snapshotPath: string | undefined;
+	const cleanTokens: string[] = [];
+
+	for (let index = 0; index < tokens.length; index += 1) {
+		const token = tokens[index];
+		if (token === "--store") {
+			store = true;
+			continue;
+		}
 		if (token === "--save") {
 			store = true;
-			return false;
+			continue;
 		}
-		return true;
-	});
-
-	if (cleanTokens.length === 0) {
-		const envSelectors = process.env.ZENMONEY_REGISTER_SELECTORS?.trim();
-		if (envSelectors) {
-			return {
-				selectors: splitSelectors(envSelectors),
-				period: undefined,
-				store,
-			};
+		if (token === "--entity") {
+			entity = tokens[index + 1] ?? entity;
+			index += 1;
+			continue;
 		}
-		return { selectors: [], period: undefined, store };
+		if (token.startsWith("--entity=")) {
+			entity = token.slice("--entity=".length) || entity;
+			continue;
+		}
+		if (token === "--snapshot-path") {
+			snapshotPath = tokens[index + 1] ?? snapshotPath;
+			index += 1;
+			continue;
+		}
+		if (token.startsWith("--snapshot-path=")) {
+			snapshotPath = token.slice("--snapshot-path=".length) || snapshotPath;
+			continue;
+		}
+		cleanTokens.push(token);
 	}
 
-	let period: string | undefined;
 	const last = cleanTokens.at(-1);
+	let period: string | undefined;
 	if (last && /^\d{4}-\d{2}$/.test(last)) {
 		period = last;
 		cleanTokens.pop();
 	}
 
 	const selectorText = cleanTokens.join(" ").trim();
-	if (!selectorText) {
-		const envSelectors = process.env.ZENMONEY_REGISTER_SELECTORS?.trim();
-		if (envSelectors) {
-			return {
-				selectors: splitSelectors(envSelectors),
-				period,
-				store,
-			};
-		}
-		return { selectors: [], period, store };
-	}
-
 	return {
-		selectors: splitSelectors(selectorText),
+		entity: normalizeZenMoneyEntity(entity),
+		selectors: selectorText ? splitSelectors(selectorText) : [],
 		period,
+		snapshotPath: snapshotPath
+			? normalizeZenMoneySnapshotPath(snapshotPath, "Snapshot path")
+			: undefined,
 		store,
 	};
 }
 
-function buildZenMoneyBalanceSummary(
-	rows: BankTransactionRow[],
-	selectors: string[],
-	period: string | undefined,
-	accounts: ResolvedAccount[],
-	balances: Map<string, number>,
-): string {
-	const transactionSummary = formatTransactionsSummary(rows, selectors, period, accounts);
+function buildZenMoneyBalanceSummary(params: {
+	entity: string;
+	rows: BankTransactionRow[];
+	selectors: string[];
+	period: string | undefined;
+	accounts: ResolvedAccount[];
+	balances: Map<string, number>;
+}): string {
+	const transactionSummary = formatTransactionsSummary(
+		params.rows,
+		params.selectors,
+		params.period,
+		params.accounts,
+	);
 	const lines: string[] = [
 		"# ZenMoney Balance",
 		"",
+		`- Entity: ${params.entity}`,
 		`- Source: ZenMoney API`,
-		`- Account selectors: ${selectors.join(", ")}`,
-		`- Accounts matched: ${accounts.length}`,
-		`- Transactions returned: ${rows.length}`,
-		`- Period: ${period || "all available dates"}`,
+		`- Account selectors: ${params.selectors.join(", ")}`,
+		`- Accounts matched: ${params.accounts.length}`,
+		`- Transactions returned: ${params.rows.length}`,
+		`- Period: ${params.period || "all available dates"}`,
 		"",
 		"## Current balances by currency",
 	];
 
-	if (balances.size > 0) {
-		[...balances.entries()]
+	if (params.balances.size > 0) {
+		[...params.balances.entries()]
 			.sort(([left], [right]) => left.localeCompare(right))
 			.forEach(([currency, balance]) => {
 				lines.push(`- ${currency}: ${formatMoney(balance, currency)}`);
@@ -1221,14 +781,14 @@ function buildZenMoneyBalanceSummary(
 	}
 
 	lines.push("", "## Account balances", "");
-	if (accounts.length === 0) {
+	if (params.accounts.length === 0) {
 		lines.push("No accounts matched.");
 	} else {
 		lines.push(
 			"| Account | Currency | Balance | Sync IDs | Company | Archived |",
 			"|---|---|---:|---|---|---|",
 		);
-		accounts.forEach((entry) => {
+		params.accounts.forEach((entry) => {
 			lines.push(
 				`| ${(entry.account.title || "—").replace(/\|/g, " ")} | ${entry.currency} | ${formatMoney(entry.account.balance ?? undefined, entry.currency)} | ${((entry.account.syncID || []).join(", ") || "—").replace(/\|/g, " ")} | ${entry.company.replace(/\|/g, " ")} | ${entry.account.archive ? "yes" : "no"} |`,
 			);
@@ -1274,9 +834,11 @@ async function readZenMoneyTransactions(
 }
 
 async function readZenMoneyBalanceSnapshot(params: {
-	selectors: string[];
+	entity?: string;
+	selectors?: string[];
 	period?: string;
 }): Promise<{
+	entity: string;
 	summary: string;
 	csv: string;
 	transactions: BankTransactionRow[];
@@ -1286,7 +848,10 @@ async function readZenMoneyBalanceSnapshot(params: {
 	transactionCount: number;
 	tags: Map<string, string>;
 }> {
-	const result = await readZenMoneyTransactions(params.selectors, params.period);
+	const entity = normalizeZenMoneyEntity(params.entity);
+	const policy = await readZenMoneyEntityPolicy(entity);
+	const selectors = resolveZenMoneySnapshotSelectors(params.selectors ?? [], policy, entity);
+	const result = await readZenMoneyTransactions(selectors, params.period);
 	const balancesByCurrencyMap = result.accounts.reduce((map, entry) => {
 		const value = entry.account.balance;
 		if (value === undefined || value === null || Number.isNaN(value)) return map;
@@ -1303,15 +868,17 @@ async function readZenMoneyBalanceSnapshot(params: {
 		return map;
 	}, new Map<string, CurrencyTotals>());
 
-	const summary = buildZenMoneyBalanceSummary(
-		result.transactions,
-		params.selectors,
-		params.period,
-		result.accounts,
-		balancesByCurrencyMap,
-	);
+	const summary = buildZenMoneyBalanceSummary({
+		entity,
+		rows: result.transactions,
+		selectors,
+		period: params.period,
+		accounts: result.accounts,
+		balances: balancesByCurrencyMap,
+	});
 
 	return {
+		entity,
 		summary,
 		csv: result.csv,
 		transactions: result.transactions,
@@ -1329,9 +896,25 @@ async function readZenMoneyBalanceSnapshot(params: {
 	};
 }
 
+function resolveZenMoneySnapshotBaseDir(params: {
+	entity: string;
+	snapshotPath?: string;
+	policy: ZenMoneyEntityPolicy;
+}): string {
+	const configuredPath =
+		params.snapshotPath?.trim() ||
+		params.policy.snapshot_path?.trim() ||
+		process.env.ZENMONEY_SNAPSHOT_PATH?.trim();
+	return configuredPath
+		? normalizeZenMoneySnapshotPath(configuredPath, "Snapshot path")
+		: entitySnapshotsDir(params.entity);
+}
+
 async function storeZenMoneyBalanceSnapshot(params: {
+	entity: string;
 	selectors: string[];
 	period?: string;
+	snapshotPath?: string;
 	summary: string;
 	csv: string;
 	accounts: ResolvedAccount[];
@@ -1340,18 +923,24 @@ async function storeZenMoneyBalanceSnapshot(params: {
 	transactionCount: number;
 	tags?: Map<string, string>;
 }): Promise<{ jsonPath: string; csvPath: string }> {
+	const entity = normalizeZenMoneyEntity(params.entity);
 	const selectorSlug = makeSelectorSlug(params.selectors);
 	const periodPart = params.period || "all";
 	const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 	const filePrefix = `${selectorSlug}-${periodPart}-${timestamp}`;
+	const baseDir = resolveZenMoneySnapshotBaseDir({
+		entity,
+		snapshotPath: params.snapshotPath,
+		policy: await readZenMoneyEntityPolicy(entity),
+	});
 
-	const baseDir = join("ZenMoney", "Snapshots");
 	await fs.mkdir(baseDir, { recursive: true });
 
 	const jsonPath = join(baseDir, `${filePrefix}.json`);
 	const csvPath = join(baseDir, `${filePrefix}.csv`);
 
 	const payload = {
+		entity,
 		generatedAt: new Date().toISOString(),
 		selectors: params.selectors,
 		period: params.period,
@@ -1373,7 +962,12 @@ async function storeZenMoneyBalanceSnapshot(params: {
 		summary: params.summary,
 	};
 
-	await fs.writeFile(jsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+	await fs.writeFile(
+		jsonPath,
+		`${JSON.stringify(payload, null, 2)}
+`,
+		"utf8",
+	);
 	await fs.writeFile(csvPath, params.csv, "utf8");
 
 	return { jsonPath, csvPath };
@@ -1464,19 +1058,13 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 		description: "Summarize ZenMoney balances and monthly totals for ZenMoney accounts",
 		handler: async (args: string, ctx: CommandContext) => {
 			const parsed = parseZenMoneyBalanceArgs(args);
-			if (parsed.selectors.length === 0) {
-				ctx.ui.notify(
-					"Usage: /zen-balance <selector[,selector...]> [YYYY-MM] [--store].\nIf selectors are omitted, set ZENMONEY_REGISTER_SELECTORS.",
-					"error",
-				);
-				return;
-			}
 
 			await runZenMoneyBoundary(
 				ctx,
 				Effect.gen(function* () {
 					const result = yield* effectFromZenMoneyPromise(() =>
 						readZenMoneyBalanceSnapshot({
+							entity: parsed.entity,
 							selectors: parsed.selectors,
 							period: parsed.period,
 						}),
@@ -1486,8 +1074,10 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 					if (parsed.store) {
 						const saved = yield* effectFromZenMoneyPromise(() =>
 							storeZenMoneyBalanceSnapshot({
+								entity: parsed.entity,
 								selectors: parsed.selectors,
 								period: parsed.period,
+								snapshotPath: parsed.snapshotPath,
 								summary: result.summary,
 								csv: result.csv,
 								accounts: result.accounts,
@@ -1497,13 +1087,13 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 								tags: result.tags,
 							}),
 						);
-						summary += `\n\nSaved local base snapshot to:\n- ${saved.jsonPath}\n- ${saved.csvPath}`;
+						summary += `\n\nSaved local snapshot to:\n- ${saved.jsonPath}\n- ${saved.csvPath}`;
 					}
 
 					yield* Effect.sync(() => {
 						sendZenMoneyReport(
 							pi,
-							`ZenMoney balance ${parsed.selectors.join(",")} ${parsed.period ?? "all"}`,
+							`ZenMoney balance ${parsed.entity}${parsed.period ? ` ${parsed.period}` : ""}`,
 							summary,
 						);
 					});
@@ -1512,99 +1102,28 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("zen-register", {
-		description: "Preview or write the canonical ZenMoney transaction JSONL register",
-		handler: async (args: string, ctx: CommandContext) => {
-			const parsed = parseZenMoneyRegisterArgs(args);
-			if (!parsed.period) {
-				ctx.ui.notify(
-					"Usage: /zen-register <YYYY-MM> [--write] [selector[,selector...]].\nIf selectors are omitted, ZenMoney/register-policy.json is used.",
-					"error",
-				);
-				return;
-			}
-
-			const period = parsed.period;
-			await runZenMoneyBoundary(
-				ctx,
-				Effect.gen(function* () {
-					const result = yield* effectFromZenMoneyPromise(() =>
-						prepareZenMoneyRegister({
-							period,
-							selectors: parsed.selectors.length > 0 ? parsed.selectors : undefined,
-							write: parsed.write,
-						}),
-					);
-					yield* Effect.sync(() => {
-						sendZenMoneyReport(pi, `ZenMoney register ${period}`, result.summary);
-					});
-				}),
-			);
-		},
-	});
-
-	pi.registerTool({
-		name: "zenmoney_list_accounts",
-		label: "ZenMoney List Accounts",
-		description: "List ZenMoney accounts for explicit selection",
-		promptSnippet: "List available ZenMoney accounts before selecting accounts for a query",
-		promptGuidelines: [
-			"Use this tool before fetching transactions from ZenMoney when you want to narrow the selected accounts.",
-			"Selectors can match account id, title substring, company substring, or syncID / last digits.",
-		],
-		parameters: Type.Object({
-			query: Type.Optional(
-				Type.String({ description: "Optional filter text to narrow matching accounts" }),
-			),
-			includeArchived: Type.Optional(
-				Type.Boolean({ description: "If true, include archived accounts" }),
-			),
-		}),
-		async execute(_id: string, params: { query?: string; includeArchived?: boolean }) {
-			const result = await listZenMoneyAccounts(params.query, params.includeArchived ?? true);
-			return {
-				content: [{ type: "text", text: trimText(result.summary, 120, 12000) }],
-				details: {
-					count: result.accounts.length,
-					accounts: result.accounts.map((entry) => ({
-						id: entry.account.id,
-						title: entry.account.title,
-						company: entry.company,
-						type: entry.account.type,
-						currency: entry.currency,
-						syncID: entry.account.syncID ?? [],
-						archived: Boolean(entry.account.archive),
-						balance: entry.account.balance,
-					})),
-				},
-			};
-		},
-		renderCall(args: { query?: string; includeArchived?: boolean }, theme: Theme) {
-			return new Text(
-				`${theme.fg("toolTitle", theme.bold("zenmoney_list_accounts "))}${theme.fg("dim", `${args.query ?? "all"}${args.includeArchived === false ? " active-only" : ""}`)}`,
-				0,
-				0,
-			);
-		},
-		renderResult: renderToolResult,
-	});
-
 	pi.registerTool({
 		name: "zenmoney_balance",
 		label: "ZenMoney Balance",
-		description: "Summarize ZenMoney account balances and transaction totals",
-		promptSnippet: "Summarize ZenMoney account balances and monthly spend/income before budgeting",
+		description: "Summarize ZenMoney entity-scoped balance snapshots",
+		promptSnippet: "Summarize ZenMoney balances and monthly totals before reporting",
 		promptGuidelines: [
-			"Use explicit selectors to avoid mixing unrelated accounts.",
-			"Pass selectors that match account id, title substring, company substring, or syncID / last digits.",
+			"Use explicit selectors when you want to bypass the entity policy.",
+			"Pass an entity name to keep snapshot exports isolated per scope.",
 			"Use period to narrow results to one month, for example 2026-03.",
-			"Enable store=true to persist JSON and CSV snapshot under ZenMoney/Snapshots.",
+			"Enable store=true to persist JSON and CSV snapshots under the configured relative snapshot folder.",
 		],
 		parameters: Type.Object({
-			selectors: Type.Array(
-				Type.String({ description: "Account selectors such as titles, ids, or last digits" }),
+			entity: Type.Optional(
+				Type.String({ description: "Optional entity name such as business or default" }),
+			),
+			selectors: Type.Optional(
+				Type.Array(
+					Type.String({ description: "Account selectors such as titles, ids, or last digits" }),
+				),
 			),
 			period: Type.Optional(Type.String({ description: "Optional month filter such as 2026-03" })),
+			snapshotPath: Type.Optional(Type.String({ description: "Relative snapshot folder path" })),
 			store: Type.Optional(
 				Type.Boolean({ description: "Persist a local ZenMoney snapshot (JSON + CSV)" }),
 			),
@@ -1612,12 +1131,15 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 		async execute(
 			_id: string,
 			params: {
-				selectors: string[];
+				entity?: string;
+				selectors?: string[];
 				period?: string;
+				snapshotPath?: string;
 				store?: boolean;
 			},
 		) {
 			const result = await readZenMoneyBalanceSnapshot({
+				entity: params.entity,
 				selectors: params.selectors,
 				period: params.period,
 			});
@@ -1625,8 +1147,10 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 			let saved: { jsonPath: string; csvPath: string } | undefined;
 			if (params.store) {
 				saved = await storeZenMoneyBalanceSnapshot({
-					selectors: params.selectors,
+					entity: result.entity,
+					selectors: params.selectors ?? [],
 					period: params.period,
+					snapshotPath: params.snapshotPath,
 					summary: result.summary,
 					csv: result.csv,
 					accounts: result.accounts,
@@ -1640,6 +1164,7 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 			return {
 				content: [{ type: "text", text: trimText(result.summary, 120, 12000) }],
 				details: {
+					entity: result.entity,
 					count: result.transactionCount,
 					period: params.period || "all",
 					accounts: result.accounts.map((entry) => ({
@@ -1662,61 +1187,20 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 				},
 			};
 		},
-		renderCall(args: { selectors: string[]; period?: string; store?: boolean }, theme: Theme) {
+		renderCall(
+			args: {
+				entity?: string;
+				selectors?: string[];
+				period?: string;
+				snapshotPath?: string;
+				store?: boolean;
+			},
+			theme: Theme,
+		) {
+			const scope = args.selectors?.length ? args.selectors.join(",") : (args.entity ?? "default");
+			const pathSuffix = args.snapshotPath ? ` @ ${args.snapshotPath}` : "";
 			return new Text(
-				`${theme.fg("toolTitle", theme.bold("zenmoney_balance "))}${theme.fg("dim", `${args.selectors.join(",")} ${args.period || "all"}`)}`,
-				0,
-				0,
-			);
-		},
-		renderResult: renderToolResult,
-	});
-
-	pi.registerTool({
-		name: "zenmoney_register",
-		label: "ZenMoney Register",
-		description: "Create or preview a canonical ZenMoney transaction JSONL register",
-		promptSnippet:
-			"Store ZenMoney transactions as one JSONL row per account-side transaction before monthly reporting",
-		promptGuidelines: [
-			"Use this tool when you want the same JSONL source-of-truth pattern for ZenMoney transactions.",
-			"Use period to narrow the import to one month, for example 2026-03.",
-			"Omit selectors to use ZenMoney/register-policy.json; pass selectors only when you want a different account scope.",
-			"Set write=true only after reviewing the dry-run summary.",
-		],
-		parameters: Type.Object({
-			period: Type.String({ description: "Month to import, such as 2026-03" }),
-			selectors: Type.Optional(
-				Type.Array(Type.String({ description: "Optional explicit account selectors" })),
-			),
-			write: Type.Optional(
-				Type.Boolean({ description: "If true, write or update the JSONL register" }),
-			),
-		}),
-		async execute(_id: string, params: { period: string; selectors?: string[]; write?: boolean }) {
-			const result = await prepareZenMoneyRegister({
-				period: params.period,
-				selectors: params.selectors,
-				write: params.write,
-			});
-			return {
-				content: [{ type: "text", text: trimText(result.summary, 120, 12000) }],
-				details: {
-					period: result.period,
-					registerPath: result.registerPath,
-					dryRun: result.dryRun,
-					fetchedRows: result.fetchedRows,
-					existingRows: result.existingRows,
-					newRows: result.newRows,
-					updatedRows: result.updatedRows,
-					totalRows: result.totalRows,
-					warnings: result.warnings,
-				},
-			};
-		},
-		renderCall(args: { period: string; selectors?: string[]; write?: boolean }, theme: Theme) {
-			return new Text(
-				`${theme.fg("toolTitle", theme.bold("zenmoney_register "))}${theme.fg("dim", `${args.period}${args.write ? " --write" : ""}${args.selectors?.length ? ` ${args.selectors.join(",")}` : " policy"}`)}`,
+				`${theme.fg("toolTitle", theme.bold("zenmoney_balance "))}${theme.fg("dim", `${scope}${pathSuffix} ${args.period || "all"}${args.store ? " --store" : ""}`)}`,
 				0,
 				0,
 			);

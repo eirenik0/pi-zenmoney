@@ -1,13 +1,12 @@
 # pi-zenmoney
 
-ZenMoney Pi package for account discovery, transaction export, balance snapshots, and register generation.
+ZenMoney Pi package for account discovery, transaction export, and entity-scoped balance snapshots.
 
 ## Use cases
 
 - `/zen-accounts [query]` — list ZenMoney accounts for explicit selection.
 - `/zen-transactions <selector[,selector...]> [YYYY-MM]` — export transactions for selected accounts.
-- `/zen-balance <selector[,selector...]> [YYYY-MM] [--store]` — summarize balances and monthly totals; `--save` also works.
-- `/zen-register <YYYY-MM> [--write] [selector[,selector...]]` — preview or write the canonical ZenMoney JSONL register.
+- `/zen-balance [--entity <name>] [--snapshot-path <relative/path>] [selector[,selector...]] [YYYY-MM] [--store]` — summarize balances and monthly totals; `--save` also works.
 
 ## Install
 
@@ -35,7 +34,9 @@ The token may be a raw token, an `op://` 1Password reference, `op read ...`, or 
 Optional:
 
 - `ZENMONEY_API_BASE_URL`
-- `ZENMONEY_REGISTER_SELECTORS` — fallback selectors for `/zen-balance` when none are passed
+- `ZENMONEY_SNAPSHOT_SELECTORS` — fallback selectors for `/zen-balance` when none are passed
+- `ZENMONEY_SNAPSHOT_PATH` — fallback relative snapshot folder, resolved in the working files folder
+- `ZenMoney/Entities/<entity>/entity-policy.json` — optional per-entity `selectors` and `snapshot_path`
 
 ## ZenMoney API
 
@@ -50,3 +51,4 @@ If you only need an API token, the ZenMoney wiki notes that you can get one with
 - Project-local extension entrypoint: `src/index.ts`
 - Extension logic: `src/zenmoney.ts`
 - Secret reference helper: `src/secret-refs.ts`
+- Entity snapshots default to `ZenMoney/Entities/<entity>/Snapshots/` unless overridden by a relative path

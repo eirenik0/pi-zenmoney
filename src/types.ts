@@ -84,35 +84,9 @@ export interface BankTransactionRow {
 	categoryName?: string | null;
 }
 
-export interface ZenMoneyRegisterPolicy {
-	register_selectors?: string[];
-	review_only_selectors?: string[];
-}
-
-export interface ZenMoneyClassificationRule {
-	match?: string;
-	bucket?: string;
-	category?: string;
-	requires_review?: boolean;
-	note?: string;
-}
-
-export interface ZenMoneyClassificationRules {
-	rules?: ZenMoneyClassificationRule[];
-	internal_transfer_hints?: string[];
-}
-
-export interface ZenMoneyRegisterResult {
-	period: string;
-	registerPath: string;
-	dryRun: boolean;
-	fetchedRows: number;
-	existingRows: number;
-	newRows: number;
-	updatedRows: number;
-	totalRows: number;
-	summary: string;
-	warnings: string[];
+export interface ZenMoneyEntityPolicy {
+	selectors?: string[];
+	snapshot_path?: string;
 }
 
 export interface CurrencyTotals {

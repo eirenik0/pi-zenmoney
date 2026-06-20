@@ -1,22 +1,22 @@
 # ZenMoney Pi extension
 
-This repo packages a Pi extension for ZenMoney account discovery, transaction export, balance snapshots, and a register workflow.
+This repo packages a Pi extension for ZenMoney account discovery, transaction export, and entity-scoped balance snapshots.
 
 ## Repository overview
 
-`package.json` points Pi at the extension entrypoint, and the README documents install, token setup, and the four supported user commands.
+`package.json` points Pi at the extension entrypoint, and the README documents install, token setup, and the three supported user commands.
 
 - `/zen-accounts` lists selectable ZenMoney accounts.
 - `/zen-transactions` exports normalized transactions for chosen accounts.
-- `/zen-balance` summarizes balances and monthly totals.
-- `/zen-register` previews or writes the canonical transaction register.
+- `/zen-balance` summarizes balances and monthly totals per entity.
 
 ## Docs
 
 This index points to the two topic files that `lat_check` expects this package to expose.
 
 - [[extension]] — extension surface, commands, and live bank data.
-- [[data-workflows]] — transaction register workflow and local ZenMoney data files.
+- [[data-workflows]] — entity-scoped snapshot workflow and local ZenMoney data files.
+- [[tests]] — snapshot workflow cases that are worth automated coverage.
 
 ## Source layout
 
@@ -28,13 +28,13 @@ Thin adapter that hands Pi's extension API to [[src/zenmoney.ts#registerZenMoney
 
 ### `src/zenmoney.ts`
 
-Contains the command and tool registrations plus the core data flow: snapshot fetch, account matching, transaction normalization, balance summaries, and register generation.
+Contains the command and tool registrations plus the core data flow: snapshot fetch, account matching, transaction normalization, and balance snapshots.
 
-Key helpers: [[src/zenmoney.ts#fetchZenMoneySnapshot]], [[src/zenmoney.ts#listZenMoneyAccounts]], [[src/zenmoney.ts#readZenMoneyTransactions]], [[src/zenmoney.ts#readZenMoneyBalanceSnapshot]], [[src/zenmoney.ts#prepareZenMoneyRegister]].
+Key helpers: [[src/zenmoney.ts#fetchZenMoneySnapshot]], [[src/zenmoney.ts#listZenMoneyAccounts]], [[src/zenmoney.ts#readZenMoneyTransactions]], [[src/zenmoney.ts#readZenMoneyBalanceSnapshot]], [[src/zenmoney.ts#storeZenMoneyBalanceSnapshot]].
 
 ### `src/constants.ts` and `src/types.ts`
 
-Shared constants define preview sizing, source markers, and JSONL column order, while the types file models ZenMoney API payloads and the derived transaction/register shapes.
+Shared constants define preview sizing and source markers, while the types file models ZenMoney API payloads and the entity policy shape used by snapshots.
 
 ### `src/secret-refs.ts`
 
@@ -42,4 +42,6 @@ Resolves raw tokens and `op://` / `op read` secret references before any ZenMone
 
 ## Behavior notes
 
-Account selectors match id, title, company, syncID, or last digits. Register flows use ZenMoney policy/classification files and store snapshots/registers locally.
+Account selectors match id, title, company, syncID, or last digits. Snapshot exports can use `--entity` and `--snapshot-path`, and the path must stay relative to working files.
+
+By default, snapshots still land under `ZenMoney/Entities/<entity>/Snapshots`, and selectors can fall back to entity policy or `ZENMONEY_SNAPSHOT_SELECTORS`.
