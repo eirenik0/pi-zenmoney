@@ -1100,6 +1100,8 @@ class ZenMoneyProfileEditor {
 	private selectedProfileEntity: string;
 	private selectedAccountId: string | null;
 	private selectedAccountIds = new Set<string>();
+	private draftProfileEntity: string | null = null;
+	private draftOriginProfileEntity: string | null = null;
 	private profileSearchQuery = "";
 	private accountSearchQuery = "";
 
@@ -1123,6 +1125,13 @@ class ZenMoneyProfileEditor {
 	}
 
 	private currentProfile(): ZenMoneyWorkingProfile {
+		if (this.draftProfileEntity) {
+			return {
+				entity: this.draftProfileEntity,
+				policy: {},
+				policyPath: entityPolicyPath(this.draftProfileEntity),
+			};
+		}
 		const profile = this.profiles.find((entry) => entry.entity === this.selectedProfileEntity);
 		if (profile) return profile;
 		const firstProfile = this.profiles[0];
@@ -1163,6 +1172,9 @@ class ZenMoneyProfileEditor {
 	}
 
 	private profileSummary(profile: ZenMoneyWorkingProfile): string {
+		if (profile.entity === this.draftProfileEntity) {
+			return `new profile • ${entityPolicyPath(profile.entity)}`;
+		}
 		const selectedCount = matchingAccountIdsBySelectors(
 			this.allAccounts,
 			profile.policy.selectors ?? [],
@@ -1200,6 +1212,12 @@ class ZenMoneyProfileEditor {
 	}
 
 	private syncProfileSelection(): void {
+		if (this.draftProfileEntity) {
+			this.selectedAccountIds = new Set<string>();
+			this.selectedAccountId =
+				this.filteredAccounts()[0]?.account.id ?? this.allAccounts[0]?.account.id ?? null;
+			return;
+		}
 		const profile = this.currentProfile();
 		this.selectedAccountIds = matchingAccountIdsBySelectors(
 			this.allAccounts,
@@ -1215,6 +1233,7 @@ class ZenMoneyProfileEditor {
 	}
 
 	private ensureProfileSelectionVisible(): void {
+		if (this.draftProfileEntity) return;
 		const visible = this.filteredProfiles();
 		if (visible.length === 0) return;
 		if (!visible.some((profile) => profile.entity === this.selectedProfileEntity)) {
@@ -1231,9 +1250,35 @@ class ZenMoneyProfileEditor {
 		}
 	}
 
+	private clearDraftProfile(): void {
+		if (!this.draftProfileEntity) return;
+		this.draftProfileEntity = null;
+		this.selectedProfileEntity =
+			this.draftOriginProfileEntity ?? this.profiles[0]?.entity ?? this.selectedProfileEntity;
+		this.draftOriginProfileEntity = null;
+		this.syncProfileSelection();
+	}
+
+	private createProfileEntity(): string | null {
+		const entity = normalizeZenMoneyEntity(this.profileSearchQuery);
+		if (!entity) return null;
+		if (this.profiles.some((profile) => profile.entity === entity)) return null;
+		return entity;
+	}
+
+	private activateDraftProfile(entity: string): void {
+		this.draftOriginProfileEntity = this.selectedProfileEntity;
+		this.draftProfileEntity = entity;
+		this.selectedProfileEntity = entity;
+		this.selectedAccountIds = new Set<string>();
+		this.selectedAccountId =
+			this.filteredAccounts()[0]?.account.id ?? this.allAccounts[0]?.account.id ?? null;
+	}
+
 	private selectProfileByIndex(index: number): void {
 		const profile = this.filteredProfiles()[index];
 		if (!profile) return;
+		this.clearDraftProfile();
 		this.selectedProfileEntity = profile.entity;
 		this.syncProfileSelection();
 		this.refresh();
@@ -1243,6 +1288,7 @@ class ZenMoneyProfileEditor {
 		const visible = this.filteredProfiles();
 		if (visible.length === 0) return;
 		const nextIndex = Math.max(0, Math.min(visible.length - 1, this.visibleProfileIndex() + delta));
+		this.clearDraftProfile();
 		this.selectProfileByIndex(nextIndex);
 	}
 
@@ -1327,6 +1373,13 @@ class ZenMoneyProfileEditor {
 				return;
 			}
 			if (isReturnInput(data)) {
+				const profileEntity = this.createProfileEntity();
+				if (profileEntity) {
+					this.activateDraftProfile(profileEntity);
+					this.mode = "accounts";
+					this.refresh();
+					return;
+				}
 				this.mode = "accounts";
 				this.ensureAccountSelectionVisible();
 				this.refresh();
@@ -1338,6 +1391,11 @@ class ZenMoneyProfileEditor {
 
 		if (matchesKey(data, "escape")) {
 			if (this.clearSearchText("accounts")) return;
+			if (this.draftProfileEntity) {
+				this.clearDraftProfile();
+				this.refresh();
+				return;
+			}
 			this.mode = "profiles";
 			this.refresh();
 			return;
@@ -1434,6 +1492,14 @@ class ZenMoneyProfileEditor {
 				const summary = this.profileSummary(entry);
 				lines.push(border("│") + panel(`${prefix}${name} — ${summary}`) + border("│"));
 			}
+		}
+		const createProfileEntity = this.createProfileEntity();
+		if (createProfileEntity) {
+			lines.push(
+				border("│") +
+					panel(this.theme.fg("success", ` ＋ Create profile "${createProfileEntity}"`)) +
+					border("│"),
+			);
 		}
 
 		lines.push(border("├") + border("─".repeat(innerWidth)) + border("┤"));

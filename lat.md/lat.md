@@ -45,6 +45,6 @@ Resolves raw tokens and `op://` / `op read` secret references before any ZenMone
 
 Account selectors match id, title, company, syncID, or last digits. Snapshot exports can use `--entity` and `--snapshot-path`, and the path must stay relative to working files.
 
-The `/zen-profiles` command opens a TUI for browsing profiles and current accounts with separate live search filters; archived accounts are hidden by default, space toggles the highlighted account, and enter saves the chosen selectors back to the profile policy.
+The `/zen-profiles` command opens a TUI for browsing profiles and current accounts with separate live search filters; archived accounts are hidden by default, typing a new name can create a profile, space toggles the highlighted account, and enter saves the chosen selectors back to the profile policy.
 
 By default, snapshots still land under `ZenMoney/Entities/<entity>/Snapshots`, and selectors can fall back to entity policy or `ZENMONEY_SNAPSHOT_SELECTORS`.

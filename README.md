@@ -5,7 +5,7 @@ ZenMoney Pi package for account discovery, transaction export, and entity-scoped
 ## Use cases
 
 - `/zen-accounts [query]` — list ZenMoney accounts for explicit selection; archived accounts are hidden by default.
-- `/zen-profiles` — interactively browse working profiles and current accounts, with live search filtering; archived accounts are hidden by default.
+- `/zen-profiles` — interactively browse working profiles and current accounts, with live search filtering; archived accounts are hidden by default, and typing a new name lets you create a profile.
 - `/zen-transactions <selector[,selector...]> [YYYY-MM]` — export transactions for selected accounts.
 - `/zen-balance [--entity <name>] [--snapshot-path <relative/path>] [selector[,selector...]] [YYYY-MM] [--store]` — summarize balances and monthly totals; `--save` also works.
 

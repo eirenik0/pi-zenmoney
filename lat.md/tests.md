@@ -26,6 +26,10 @@ Storing a snapshot should write matching JSON and CSV files into the resolved fo
 
 The interactive editor should list available profiles, hide archived accounts by default, show the selected profile's current accounts, and keep navigation stable when the profile list changes.
 
+## Profile creation
+
+Typing a new entity name in the profile search and pressing Enter should create a draft profile that can be saved to a new `entity-policy.json`.
+
 ## Profile search filtering
 
 Typing should filter the active profile or account list live, with separate search text per pane, so users can narrow choices without leaving the editor.
@@ -48,4 +52,4 @@ Ctrl+C and empty-search Escape should discard draft changes and leave the profil
 
 ## Profile enter flow
 
-Enter or Return should move from profiles into accounts and save selected account ids from the account pane.
+Enter or Return should move from profiles into accounts or create a new draft profile when the search text does not match an existing entity, then save selected account ids from the account pane.
