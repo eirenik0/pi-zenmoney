@@ -1088,7 +1088,7 @@ async function storeZenMoneyBalanceSnapshot(params: {
 
 async function listZenMoneyAccounts(
 	query?: string,
-	includeArchived = true,
+	includeArchived = false,
 ): Promise<{ summary: string; accounts: ResolvedAccount[] }> {
 	const snapshot = await fetchZenMoneySnapshot();
 	const accounts = listSelectableAccounts(snapshot, query, includeArchived);
@@ -1109,6 +1109,7 @@ class ZenMoneyProfileEditor {
 		private readonly done: (result: ZenMoneyProfileEditResult | null) => void,
 		private readonly profiles: ZenMoneyWorkingProfile[],
 		private readonly accounts: ResolvedAccount[],
+		private readonly allAccounts: ResolvedAccount[],
 	) {
 		const firstProfile = this.profiles[0];
 		if (!firstProfile) throw new Error("No ZenMoney profiles available.");
@@ -1163,7 +1164,7 @@ class ZenMoneyProfileEditor {
 
 	private profileSummary(profile: ZenMoneyWorkingProfile): string {
 		const selectedCount = matchingAccountIdsBySelectors(
-			this.accounts,
+			this.allAccounts,
 			profile.policy.selectors ?? [],
 		).size;
 		const snapshotPath = profile.policy.snapshot_path || entitySnapshotsDir(profile.entity);
@@ -1201,15 +1202,15 @@ class ZenMoneyProfileEditor {
 	private syncProfileSelection(): void {
 		const profile = this.currentProfile();
 		this.selectedAccountIds = matchingAccountIdsBySelectors(
-			this.accounts,
+			this.allAccounts,
 			profile.policy.selectors ?? [],
 		);
 		const visibleAccounts = this.filteredAccounts();
 		const selectedVisibleAccount =
 			visibleAccounts.find((entry) => this.selectedAccountIds.has(entry.account.id)) ??
 			visibleAccounts[0] ??
-			this.accounts.find((entry) => this.selectedAccountIds.has(entry.account.id)) ??
-			this.accounts[0];
+			this.allAccounts.find((entry) => this.selectedAccountIds.has(entry.account.id)) ??
+			this.allAccounts[0];
 		this.selectedAccountId = selectedVisibleAccount?.account.id ?? null;
 	}
 
@@ -1539,7 +1540,7 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 				ctx,
 				Effect.gen(function* () {
 					const query = args.trim() || undefined;
-					const result = yield* effectFromZenMoneyPromise(() => listZenMoneyAccounts(query, true));
+					const result = yield* effectFromZenMoneyPromise(() => listZenMoneyAccounts(query));
 					yield* Effect.sync(() => {
 						sendZenMoneyReport(
 							pi,
@@ -1558,14 +1559,15 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 				ctx,
 				Effect.gen(function* () {
 					const snapshot = yield* effectFromZenMoneyPromise(() => fetchZenMoneySnapshot());
-					const accounts = listSelectableAccounts(snapshot, undefined, true);
+					const accounts = listSelectableAccounts(snapshot, undefined, false);
+					const allAccounts = listSelectableAccounts(snapshot, undefined, true);
 					const profiles = yield* effectFromZenMoneyPromise(() =>
 						listZenMoneyWorkingProfiles(ctx.cwd),
 					);
 					const result = yield* effectFromZenMoneyPromise(() =>
 						ctx.ui.custom<ZenMoneyProfileEditResult | null>(
 							(tui, theme, _kb, done) =>
-								new ZenMoneyProfileEditor(tui, theme, done, profiles, accounts),
+								new ZenMoneyProfileEditor(tui, theme, done, profiles, accounts, allAccounts),
 							{ overlay: true },
 						),
 					);

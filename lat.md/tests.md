@@ -24,7 +24,7 @@ Storing a snapshot should write matching JSON and CSV files into the resolved fo
 
 ## Profile browsing
 
-The interactive editor should list available profiles, show the selected profile's current accounts, and keep navigation stable when the profile list changes.
+The interactive editor should list available profiles, hide archived accounts by default, show the selected profile's current accounts, and keep navigation stable when the profile list changes.
 
 ## Profile search filtering
 
@@ -40,7 +40,7 @@ Backspace and Delete should delete one search character, while Esc should clear 
 
 ## Profile save
 
-Saving from the editor should persist selected account ids to the chosen profile policy while preserving any existing snapshot path.
+Saving from the editor should persist selected account ids to the chosen profile policy while preserving any existing snapshot path and hidden archived selections.
 
 ## Profile cancel
 
