@@ -62,6 +62,10 @@ Opening `/zenmoney` should show the current entity balance inline by default, an
 
 Transaction summaries should count only `outcome` rows as clear spending, so transfers and hold rows do not inflate expense totals.
 
+## Active profile resolution
+
+When no entity is passed, the balance and transaction tools should use the workspace's active profile instead of falling back blindly to `default`.
+
 ## Snapshot path editing
 
 Editing the hub's snapshot path should preserve relative-path validation and fall back to the entity snapshot folder when the field is reset.

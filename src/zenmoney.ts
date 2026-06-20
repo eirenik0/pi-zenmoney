@@ -648,6 +648,12 @@ function resolveZenMoneySnapshotSelectors(
 	);
 }
 
+async function resolveZenMoneyActiveEntity(cwd: string, explicitEntity?: string): Promise<string> {
+	if (explicitEntity?.trim()) return normalizeZenMoneyEntity(explicitEntity);
+	const workspace = await readZenMoneyWorkspaceConfig(cwd);
+	return normalizeZenMoneyEntity(workspace.activeEntity);
+}
+
 function buildZenMoneyBalanceSummary(params: {
 	entity: string;
 	rows: BankTransactionRow[];
@@ -757,7 +763,7 @@ async function readZenMoneyBalanceSnapshot(params: {
 	tags: Map<string, string>;
 }> {
 	const cwd = params.cwd ?? process.cwd();
-	const entity = normalizeZenMoneyEntity(params.entity);
+	const entity = await resolveZenMoneyActiveEntity(cwd, params.entity);
 	const policy = await readZenMoneyEntityPolicy(cwd, entity);
 	const selectors = resolveZenMoneySnapshotSelectors(params.selectors ?? [], policy, entity);
 	const result = await readZenMoneyTransactions(selectors, params.period);
@@ -1117,21 +1123,31 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "zenmoney_read_transactions",
 		label: "ZenMoney Read Transactions",
-		description: "Fetch normalized ZenMoney transactions for explicitly selected accounts",
-		promptSnippet: "Fetch actual bank data from ZenMoney for explicitly selected accounts",
+		description: "Fetch normalized ZenMoney transactions for the active or selected account set",
+		promptSnippet: "Fetch actual bank data from ZenMoney for the active or selected account set",
 		promptGuidelines: [
+			"Use the active ZenMoney profile when selectors are omitted, or pass entity to override it.",
 			"Use zenmoney_list_accounts first when you need to choose the relevant accounts.",
 			"Pass selectors that match account id, title substring, company substring, or syncID / last digits.",
 			"Use period to narrow results to one month, for example 2026-03.",
 		],
 		parameters: Type.Object({
-			selectors: Type.Array(
-				Type.String({ description: "Account selectors such as titles, ids, or last digits" }),
+			entity: Type.Optional(
+				Type.String({ description: "Optional entity name such as business or default" }),
+			),
+			selectors: Type.Optional(
+				Type.Array(
+					Type.String({ description: "Account selectors such as titles, ids, or last digits" }),
+				),
 			),
 			period: Type.Optional(Type.String({ description: "Optional month filter such as 2026-03" })),
 		}),
-		async execute(_id: string, params: { selectors: string[]; period?: string }) {
-			const result = await readZenMoneyTransactions(params.selectors, params.period);
+		async execute(_id: string, params: { entity?: string; selectors?: string[]; period?: string }) {
+			const cwd = process.cwd();
+			const entity = await resolveZenMoneyActiveEntity(cwd, params.entity);
+			const policy = await readZenMoneyEntityPolicy(cwd, entity);
+			const selectors = resolveZenMoneySnapshotSelectors(params.selectors ?? [], policy, entity);
+			const result = await readZenMoneyTransactions(selectors, params.period);
 			return {
 				content: [{ type: "text", text: trimText(result.summary, 120, 12000) }],
 				details: {
@@ -1147,9 +1163,10 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 				},
 			};
 		},
-		renderCall(args: { selectors: string[]; period?: string }, theme: Theme) {
+		renderCall(args: { entity?: string; selectors?: string[]; period?: string }, theme: Theme) {
+			const scope = args.selectors?.length ? args.selectors.join(",") : (args.entity ?? "active");
 			return new Text(
-				`${theme.fg("toolTitle", theme.bold("zenmoney_read_transactions "))}${theme.fg("dim", `${args.selectors.join(",")}${args.period ? ` ${args.period}` : ""}`)}`,
+				`${theme.fg("toolTitle", theme.bold("zenmoney_read_transactions "))}${theme.fg("dim", `${scope}${args.period ? ` ${args.period}` : ""}`)}`,
 				0,
 				0,
 			);
