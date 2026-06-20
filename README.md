@@ -35,7 +35,9 @@ Optional:
 - `ZENMONEY_API_BASE_URL`
 - `ZENMONEY_SNAPSHOT_SELECTORS` — fallback selectors for balance workflows when none are passed
 - `ZENMONEY_SNAPSHOT_PATH` — fallback relative snapshot folder, resolved in the working files folder
-- `ZenMoney/Entities/<entity>/entity-policy.json` — optional per-entity `selectors` and `snapshot_path` used by `/zenmoney`
+- `.pi/zenmoney/config.json` — optional workspace config for the active entity
+- `.pi/zenmoney/entities/<entity>/policy.json` — optional per-entity `selectors` and `snapshot_path` used by `/zenmoney`
+- `.pi/zenmoney/entities/<entity>/registry.json` — cached live snapshot for analysis on top of the registry
 
 ## ZenMoney API
 
@@ -50,4 +52,4 @@ If you only need an API token, the ZenMoney wiki notes that you can get one with
 - Project-local extension entrypoint: `src/index.ts`
 - Extension logic: `src/zenmoney.ts`, `src/hub.ts`
 - Secret reference helper: `src/secret-refs.ts`
-- Entity snapshots default to `ZenMoney/Entities/<entity>/Snapshots/` unless overridden by a relative path
+- Entity snapshots default to `.pi/zenmoney/entities/<entity>/snapshots/` unless overridden by a relative path

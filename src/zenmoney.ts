@@ -1,10 +1,10 @@
 import { promises as fs } from "node:fs";
-import { isAbsolute, join, normalize } from "node:path";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import type { Theme } from "@earendil-works/pi-tui";
 import { Markdown, Text } from "@earendil-works/pi-tui";
-import { Data, Effect, Either } from "effect";
+import { Data, Effect } from "effect";
 import { Type } from "typebox";
 
 import { PREVIEW_LINES } from "./constants.ts";
@@ -23,6 +23,18 @@ import type {
 	ZenMoneySnapshot,
 	ZenMoneyTransaction,
 } from "./types.ts";
+import {
+	listZenMoneyEntities,
+	normalizeZenMoneyEntity,
+	normalizeZenMoneySnapshotPath,
+	readZenMoneyEntityPolicy,
+	readZenMoneyWorkspaceConfig,
+	writeZenMoneyEntityPolicy,
+	writeZenMoneyRegistry,
+	writeZenMoneyWorkspaceConfig,
+	zenMoneyEntityPolicyPath,
+	zenMoneyEntitySnapshotsDir,
+} from "./workspace.ts";
 
 class ZenMoneyCommandError extends Data.TaggedError("ZenMoneyCommandError")<{
 	message: string;
@@ -563,105 +575,22 @@ function formatTransactionsSummary(
 	return lines.join("\n");
 }
 
-function makeSelectorSlug(selectors: string[]): string {
-	const normalized = selectors
-		.map((selector) => normalizeText(selector))
-		.join(" ")
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/(^-|-$)/g, "");
-	return normalized || "zenmoney-accounts";
-}
-
-function normalizeZenMoneyEntity(entity?: string): string {
-	const normalized = normalizeText(entity ?? "default")
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/(^-|-$)/g, "");
-	return normalized || "default";
-}
-
-function zenMoneyEntitiesRoot(cwd: string): string {
-	return join(cwd, "ZenMoney", "Entities");
-}
-
-function entityPolicyPath(entity: string, baseDir = ""): string {
-	return join(
-		baseDir,
-		"ZenMoney",
-		"Entities",
-		normalizeZenMoneyEntity(entity),
-		"entity-policy.json",
-	);
-}
-
-function entitySnapshotsDir(entity: string, baseDir = ""): string {
-	return join(baseDir, "ZenMoney", "Entities", normalizeZenMoneyEntity(entity), "Snapshots");
-}
-
-function normalizeZenMoneySnapshotPath(pathValue: string, label: string): string {
-	const trimmed = pathValue.trim();
-	if (!trimmed) throw new Error(`${label} must not be empty.`);
-	if (isAbsolute(trimmed))
-		throw new Error(`${label} must be relative to the working files folder.`);
-
-	const normalized = normalize(trimmed).replaceAll("\\", "/");
-	if (!normalized || normalized === ".") throw new Error(`${label} must not be empty.`);
-	if (normalized.split("/").some((segment) => segment === "..")) {
-		throw new Error(`${label} must not escape the working files folder.`);
-	}
-
-	return normalized;
-}
-
-async function readZenMoneyEntityPolicy(entity: string): Promise<ZenMoneyEntityPolicy> {
-	return (await readJsonObject<ZenMoneyEntityPolicy>(entityPolicyPath(entity))) ?? {};
-}
-
-async function readZenMoneyEntityPolicyAt(
-	cwd: string,
-	entity: string,
-): Promise<ZenMoneyEntityPolicy> {
-	return (await readJsonObject<ZenMoneyEntityPolicy>(entityPolicyPath(entity, cwd))) ?? {};
-}
-
-async function writeZenMoneyEntityPolicyAt(
-	cwd: string,
-	entity: string,
-	policy: ZenMoneyEntityPolicy,
-): Promise<string> {
-	const policyPath = entityPolicyPath(entity, cwd);
-	await fs.mkdir(join(cwd, "ZenMoney", "Entities", normalizeZenMoneyEntity(entity)), {
-		recursive: true,
-	});
-	await fs.writeFile(policyPath, `${JSON.stringify(policy, null, 2)}\n`, "utf8");
-	return policyPath;
-}
-
 async function listZenMoneyWorkingProfiles(cwd: string): Promise<ZenMoneyWorkingProfile[]> {
 	const profiles = new Map<string, ZenMoneyWorkingProfile>();
-	const root = zenMoneyEntitiesRoot(cwd);
-
-	try {
-		const entries = await fs.readdir(root, { withFileTypes: true });
-		for (const entry of entries) {
-			if (!entry.isDirectory()) continue;
-			const entity = normalizeZenMoneyEntity(entry.name);
-			profiles.set(entity, {
-				entity,
-				policy: await readZenMoneyEntityPolicyAt(cwd, entity),
-				policyPath: entityPolicyPath(entity, cwd),
-			});
-		}
-	} catch (error) {
-		const code = (error as { code?: string }).code;
-		if (code !== "ENOENT") throw error;
+	for (const entity of await listZenMoneyEntities(cwd)) {
+		profiles.set(entity, {
+			entity,
+			policy: await readZenMoneyEntityPolicy(cwd, entity),
+			policyPath: zenMoneyEntityPolicyPath(entity, cwd),
+		});
 	}
 
 	const defaultEntity = normalizeZenMoneyEntity("default");
 	if (!profiles.has(defaultEntity)) {
 		profiles.set(defaultEntity, {
 			entity: defaultEntity,
-			policy: await readZenMoneyEntityPolicyAt(cwd, defaultEntity),
-			policyPath: entityPolicyPath(defaultEntity, cwd),
+			policy: await readZenMoneyEntityPolicy(cwd, defaultEntity),
+			policyPath: zenMoneyEntityPolicyPath(defaultEntity, cwd),
 		});
 	}
 
@@ -680,35 +609,8 @@ function resolveZenMoneySnapshotSelectors(
 	if (envSelectors) return splitSelectors(envSelectors);
 
 	throw new Error(
-		`No ZenMoney selectors configured for entity \`${entity}\`. Add ${entityPolicyPath(entity)}, set ZENMONEY_SNAPSHOT_SELECTORS, or pass explicit selectors.`,
+		`No ZenMoney selectors configured for entity \`${entity}\`. Add ${zenMoneyEntityPolicyPath(entity)}, set ZENMONEY_SNAPSHOT_SELECTORS, or pass explicit selectors.`,
 	);
-}
-
-function readJsonObjectEffect<T>(path: string): Effect.Effect<T | undefined> {
-	return Effect.flatMap(
-		Effect.either(
-			Effect.tryPromise({
-				try: () => fs.readFile(path, "utf8"),
-				catch: (cause) => cause,
-			}),
-		),
-		(result) => {
-			if (Either.isLeft(result)) {
-				const error = result.left as { code?: string };
-				if (error.code === "ENOENT") return Effect.succeed(undefined);
-				return Effect.fail(error instanceof Error ? error : new Error(String(error)));
-			}
-
-			return Effect.try({
-				try: () => JSON.parse(result.right) as T,
-				catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-			});
-		},
-	);
-}
-
-async function readJsonObject<T>(path: string): Promise<T | undefined> {
-	return Effect.runPromise(readJsonObjectEffect<T>(path));
 }
 
 function buildZenMoneyBalanceSummary(params: {
@@ -777,6 +679,7 @@ async function readZenMoneyTransactions(
 	transactions: BankTransactionRow[];
 	accounts: ResolvedAccount[];
 	tags: Map<string, string>;
+	snapshot: ZenMoneySnapshot;
 }> {
 	const normalizedPeriod = parseMonthPeriod(period);
 	if (period && !normalizedPeriod) {
@@ -798,10 +701,12 @@ async function readZenMoneyTransactions(
 		transactions: rows,
 		accounts,
 		tags,
+		snapshot,
 	};
 }
 
 async function readZenMoneyBalanceSnapshot(params: {
+	cwd?: string;
 	entity?: string;
 	selectors?: string[];
 	period?: string;
@@ -816,10 +721,12 @@ async function readZenMoneyBalanceSnapshot(params: {
 	transactionCount: number;
 	tags: Map<string, string>;
 }> {
+	const cwd = params.cwd ?? process.cwd();
 	const entity = normalizeZenMoneyEntity(params.entity);
-	const policy = await readZenMoneyEntityPolicy(entity);
+	const policy = await readZenMoneyEntityPolicy(cwd, entity);
 	const selectors = resolveZenMoneySnapshotSelectors(params.selectors ?? [], policy, entity);
 	const result = await readZenMoneyTransactions(selectors, params.period);
+	await writeZenMoneyRegistry(cwd, entity, result.snapshot);
 	const balancesByCurrencyMap = result.accounts.reduce((map, entry) => {
 		const value = entry.account.balance;
 		if (value === undefined || value === null || Number.isNaN(value)) return map;
@@ -865,6 +772,7 @@ async function readZenMoneyBalanceSnapshot(params: {
 }
 
 function resolveZenMoneySnapshotBaseDir(params: {
+	cwd: string;
 	entity: string;
 	snapshotPath?: string;
 	policy: ZenMoneyEntityPolicy;
@@ -875,10 +783,11 @@ function resolveZenMoneySnapshotBaseDir(params: {
 		process.env.ZENMONEY_SNAPSHOT_PATH?.trim();
 	return configuredPath
 		? normalizeZenMoneySnapshotPath(configuredPath, "Snapshot path")
-		: entitySnapshotsDir(params.entity);
+		: zenMoneyEntitySnapshotsDir(params.entity, params.cwd ?? process.cwd());
 }
 
 async function storeZenMoneyBalanceSnapshot(params: {
+	cwd?: string;
 	entity: string;
 	selectors: string[];
 	period?: string;
@@ -891,15 +800,17 @@ async function storeZenMoneyBalanceSnapshot(params: {
 	transactionCount: number;
 	tags?: Map<string, string>;
 }): Promise<{ jsonPath: string; csvPath: string }> {
+	const cwd = params.cwd ?? process.cwd();
 	const entity = normalizeZenMoneyEntity(params.entity);
 	const selectorSlug = makeSelectorSlug(params.selectors);
 	const periodPart = params.period || "all";
 	const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 	const filePrefix = `${selectorSlug}-${periodPart}-${timestamp}`;
 	const baseDir = resolveZenMoneySnapshotBaseDir({
+		cwd,
 		entity,
 		snapshotPath: params.snapshotPath,
-		policy: await readZenMoneyEntityPolicy(entity),
+		policy: await readZenMoneyEntityPolicy(cwd, entity),
 	});
 
 	await fs.mkdir(baseDir, { recursive: true });
@@ -967,10 +878,21 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 				const profiles = yield* effectFromZenMoneyPromise(() =>
 					listZenMoneyWorkingProfiles(ctx.cwd),
 				);
+				const workspace = yield* effectFromZenMoneyPromise(() =>
+					readZenMoneyWorkspaceConfig(ctx.cwd),
+				);
 				const result = yield* effectFromZenMoneyPromise(() =>
 					ctx.ui.custom<ZenMoneyHubResult | null>(
 						(tui, theme, _kb, done) =>
-							new ZenMoneyHubEditor(tui, theme, done, profiles, accounts, allAccounts),
+							new ZenMoneyHubEditor(
+								tui,
+								theme,
+								done,
+								profiles,
+								accounts,
+								allAccounts,
+								workspace.activeEntity,
+							),
 						{ overlay: true },
 					),
 				);
@@ -979,16 +901,23 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 
 				const currentProfile = profiles.find((profile) => profile.entity === result.entity);
 				const saved = yield* effectFromZenMoneyPromise(() =>
-					writeZenMoneyEntityPolicyAt(ctx.cwd, result.entity, {
+					writeZenMoneyEntityPolicy(ctx.cwd, result.entity, {
 						...(currentProfile?.policy ?? {}),
 						selectors: result.selectors,
 						snapshot_path: result.snapshotPath,
 					}),
 				);
+				yield* effectFromZenMoneyPromise(() =>
+					writeZenMoneyWorkspaceConfig(ctx.cwd, { activeEntity: result.entity }),
+				);
 
 				if (result.kind === "balance") {
 					const balance = yield* effectFromZenMoneyPromise(() =>
-						readZenMoneyBalanceSnapshot({ entity: result.entity, selectors: result.selectors }),
+						readZenMoneyBalanceSnapshot({
+							cwd: ctx.cwd,
+							entity: result.entity,
+							selectors: result.selectors,
+						}),
 					);
 					yield* Effect.sync(() => {
 						sendZenMoneyReport(pi, `ZenMoney balance ${result.entity}`, balance.summary);

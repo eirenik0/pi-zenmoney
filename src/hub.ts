@@ -1,6 +1,12 @@
 import type { Theme } from "@earendil-works/pi-tui";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import type { ResolvedAccount, ZenMoneyEntityPolicy } from "./types.ts";
+import {
+	normalizeZenMoneyEntity,
+	normalizeZenMoneySnapshotPath,
+	zenMoneyEntityPolicyPath,
+	zenMoneyEntitySnapshotsDir,
+} from "./workspace.ts";
 
 export type ZenMoneyHubResult =
 	| {
@@ -63,37 +69,6 @@ function isPrintableTextInput(data: string): boolean {
 	return data.length === 1 && data.charCodeAt(0) >= 32 && data.charCodeAt(0) !== 127;
 }
 
-function normalizeZenMoneyEntity(entity?: string): string {
-	const normalized = normalizeText(entity ?? "default")
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/(^-|-$)/g, "");
-	return normalized || "default";
-}
-
-function entityPolicyPath(entity: string, baseDir = ""): string {
-	return [baseDir, "ZenMoney", "Entities", normalizeZenMoneyEntity(entity), "entity-policy.json"]
-		.filter(Boolean)
-		.join("/");
-}
-
-function entitySnapshotsDir(entity: string, baseDir = ""): string {
-	return [baseDir, "ZenMoney", "Entities", normalizeZenMoneyEntity(entity), "Snapshots"]
-		.filter(Boolean)
-		.join("/");
-}
-
-function normalizeZenMoneySnapshotPath(pathValue: string, label: string): string {
-	const trimmed = pathValue.trim();
-	if (!trimmed) throw new Error(`${label} must not be empty.`);
-	if (trimmed.startsWith("/"))
-		throw new Error(`${label} must be relative to the working files folder.`);
-	const normalized = trimmed.replace(/\\+/g, "/");
-	if (normalized.split("/").some((segment) => segment === "..")) {
-		throw new Error(`${label} must not escape the working files folder.`);
-	}
-	return normalized;
-}
-
 function matchingAccountIdsBySelectors(
 	accounts: ResolvedAccount[],
 	selectors: string[],
@@ -144,10 +119,14 @@ export class ZenMoneyHubEditor {
 		private readonly profiles: ZenMoneyWorkingProfile[],
 		private readonly accounts: ResolvedAccount[],
 		private readonly allAccounts: ResolvedAccount[],
+		initialEntity?: string,
 	) {
 		const firstProfile = this.profiles[0];
 		if (!firstProfile) throw new Error("No ZenMoney profiles available.");
-		this.selectedProfileEntity = firstProfile.entity;
+		const initialProfile = initialEntity
+			? this.profiles.find((entry) => entry.entity === initialEntity)
+			: undefined;
+		this.selectedProfileEntity = initialProfile?.entity ?? firstProfile.entity;
 		this.selectedAccountId = this.accounts[0]?.account.id ?? null;
 		this.syncProfileSelection();
 	}
@@ -161,7 +140,7 @@ export class ZenMoneyHubEditor {
 			return {
 				entity: this.draftProfileEntity,
 				policy: { snapshot_path: this.snapshotPathDraft },
-				policyPath: entityPolicyPath(this.draftProfileEntity),
+				policyPath: zenMoneyEntityPolicyPath(this.draftProfileEntity),
 			};
 		}
 		const profile = this.profiles.find((entry) => entry.entity === this.selectedProfileEntity);
@@ -175,7 +154,7 @@ export class ZenMoneyHubEditor {
 		return (
 			this.snapshotPathDraft ||
 			this.snapshotPathBase ||
-			entitySnapshotsDir(this.currentProfile().entity)
+			zenMoneyEntitySnapshotsDir(this.currentProfile().entity)
 		);
 	}
 
@@ -207,7 +186,7 @@ export class ZenMoneyHubEditor {
 	}
 
 	private profileSnapshotPath(profile: ZenMoneyWorkingProfile): string {
-		return profile.policy.snapshot_path || entitySnapshotsDir(profile.entity);
+		return profile.policy.snapshot_path || zenMoneyEntitySnapshotsDir(profile.entity);
 	}
 
 	private syncSnapshotPathDraft(profile?: ZenMoneyWorkingProfile): void {
@@ -373,7 +352,7 @@ export class ZenMoneyHubEditor {
 		this.draftOriginProfileEntity = this.selectedProfileEntity;
 		this.draftProfileEntity = entity;
 		this.selectedProfileEntity = entity;
-		this.snapshotPathBase = entitySnapshotsDir(entity);
+		this.snapshotPathBase = zenMoneyEntitySnapshotsDir(entity);
 		this.snapshotPathDraft = this.snapshotPathBase;
 		this.selectedAccountIds = new Set<string>();
 		this.selectedAccountId =

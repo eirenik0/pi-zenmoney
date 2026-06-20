@@ -28,7 +28,7 @@ The interactive editor should list available profiles, hide archived accounts by
 
 ## Profile creation
 
-Typing a new entity name in the profile search and pressing Enter should create a draft profile that can be saved to a new `entity-policy.json`.
+Typing a new entity name in the profile search and pressing Enter should create a draft profile that can be saved to a new `.pi/zenmoney/entities/<entity>/policy.json`.
 
 ## Profile search filtering
 

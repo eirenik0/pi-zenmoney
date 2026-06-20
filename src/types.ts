@@ -27,6 +27,12 @@ export interface ZenMoneyAccount {
 	archive?: boolean;
 }
 
+export interface ResolvedAccount {
+	account: ZenMoneyAccount;
+	currency: string;
+	company: string;
+}
+
 export interface ZenMoneyMerchant {
 	id: string;
 	title?: string;
@@ -87,6 +93,10 @@ export interface BankTransactionRow {
 export interface ZenMoneyEntityPolicy {
 	selectors?: string[];
 	snapshot_path?: string;
+}
+
+export interface ZenMoneyWorkspaceConfig {
+	activeEntity?: string;
 }
 
 export interface CurrencyTotals {

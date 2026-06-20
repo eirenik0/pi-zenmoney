@@ -1,6 +1,6 @@
 # ZenMoney Pi extension
 
-This repo packages a Pi extension for ZenMoney account discovery, transaction export, and entity-scoped balance snapshots.
+This repo packages a Pi extension for ZenMoney account discovery, transaction export, and entity-scoped balance snapshots backed by `.pi/zenmoney/` workspace state.
 
 ## Repository overview
 
@@ -19,7 +19,7 @@ This index points to the two topic files that `lat_check` expects this package t
 
 ## Source layout
 
-The source is split into a thin entrypoint, the ZenMoney command/tool implementation, the unified settings hub, and small shared modules for constants, types, and secret resolution.
+The source is split into a thin entrypoint, the ZenMoney command/tool implementation, the unified settings hub, and small shared modules for constants, types, workspace state, and secret resolution.
 
 ### `src/index.ts`
 
@@ -27,7 +27,7 @@ Thin adapter that hands Pi's extension API to [[src/zenmoney.ts#registerZenMoney
 
 ### `src/zenmoney.ts`
 
-Contains the command and tool registrations plus the core data flow: snapshot fetch, account matching, transaction normalization, and balance snapshots.
+Contains the command and tool registrations plus the core data flow: snapshot fetch, account matching, transaction normalization, working-memory registry persistence, and balance snapshots.
 
 Key helpers: [[src/zenmoney.ts#fetchZenMoneySnapshot]], [[src/hub.ts#ZenMoneyHubEditor]], [[src/zenmoney.ts#readZenMoneyTransactions]], [[src/zenmoney.ts#readZenMoneyBalanceSnapshot]], [[src/zenmoney.ts#storeZenMoneyBalanceSnapshot]].
 
@@ -51,4 +51,4 @@ The `/zenmoney` hub opens a TUI for browsing profiles and current accounts with 
 
 The `/zenmoney` hub shows an inline balance summary for the currently selected entity and accounts, reusing the same selector and snapshot-path state.
 
-By default, snapshots still land under `ZenMoney/Entities/<entity>/Snapshots`, and selectors can fall back to entity policy or `ZENMONEY_SNAPSHOT_SELECTORS`.
+By default, snapshots still land under `.pi/zenmoney/entities/<entity>/snapshots/`, and selectors can fall back to entity policy or `ZENMONEY_SNAPSHOT_SELECTORS`.
