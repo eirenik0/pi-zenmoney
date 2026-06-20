@@ -18,9 +18,9 @@ Accepted snapshot paths must stay relative to the working files folder and rejec
 
 Storing a snapshot should write matching JSON and CSV files into the resolved folder and preserve entity, period, selector, and totals metadata.
 
-## Command and tool parity
+## Hub and tool parity
 
-`/zen-balance` and `zenmoney_balance` should agree on entity scoping, snapshot path handling, and stored output shape.
+The balance summary shown in `/zenmoney` and `zenmoney_balance` should agree on entity scoping, snapshot path handling, and stored output shape.
 
 ## Profile browsing
 

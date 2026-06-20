@@ -4,11 +4,8 @@ ZenMoney Pi package for account discovery, transaction export, and entity-scoped
 
 ## Use cases
 
-- `/zen-accounts [query]` — list ZenMoney accounts for explicit selection; archived accounts are hidden by default.
 - `/zenmoney` — open the ZenMoney settings hub for profiles, accounts, snapshot-path setup, and an inline balance summary.
-- `/zen-profiles` — legacy alias for profile/account editing; typing a new name lets you create a profile.
 - `/zen-transactions <selector[,selector...]> [YYYY-MM]` — export transactions for selected accounts.
-- `/zen-balance [--entity <name>] [--snapshot-path <relative/path>] [selector[,selector...]] [YYYY-MM] [--store]` — summarize balances and monthly totals; `--save` also works.
 
 ## Install
 
@@ -36,9 +33,9 @@ The token may be a raw token, an `op://` 1Password reference, `op read ...`, or 
 Optional:
 
 - `ZENMONEY_API_BASE_URL`
-- `ZENMONEY_SNAPSHOT_SELECTORS` — fallback selectors for `/zen-balance` when none are passed
+- `ZENMONEY_SNAPSHOT_SELECTORS` — fallback selectors for balance workflows when none are passed
 - `ZENMONEY_SNAPSHOT_PATH` — fallback relative snapshot folder, resolved in the working files folder
-- `ZenMoney/Entities/<entity>/entity-policy.json` — optional per-entity `selectors` and `snapshot_path` used by `/zen-profiles`
+- `ZenMoney/Entities/<entity>/entity-policy.json` — optional per-entity `selectors` and `snapshot_path` used by `/zenmoney`
 
 ## ZenMoney API
 
