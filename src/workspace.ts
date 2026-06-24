@@ -122,3 +122,7 @@ export async function writeZenMoneyRegistry(
 ): Promise<string> {
 	return writeJsonObject(zenMoneyEntityRegistryPath(entity, cwd), registry);
 }
+
+export async function deleteZenMoneyEntity(cwd: string, entity: string): Promise<void> {
+	await fs.rm(zenMoneyEntityDir(entity, cwd), { recursive: true, force: true });
+}

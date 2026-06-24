@@ -24,6 +24,7 @@ import type {
 	ZenMoneyTransaction,
 } from "./types.ts";
 import {
+	deleteZenMoneyEntity,
 	listZenMoneyEntities,
 	normalizeZenMoneyEntity,
 	normalizeZenMoneySnapshotPath,
@@ -939,6 +940,23 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 				);
 
 				if (!result) return;
+
+				if (result.kind === "delete") {
+					yield* effectFromZenMoneyPromise(() => deleteZenMoneyEntity(ctx.cwd, result.entity));
+					const nextActiveEntity = profiles.find(
+						(profile) => profile.entity !== result.entity,
+					)?.entity;
+					yield* effectFromZenMoneyPromise(() =>
+						writeZenMoneyWorkspaceConfig(
+							ctx.cwd,
+							nextActiveEntity ? { activeEntity: nextActiveEntity } : {},
+						),
+					);
+					yield* Effect.sync(() => {
+						ctx.ui.notify(`Deleted ZenMoney profile ${result.entity}`, "info");
+					});
+					return;
+				}
 
 				const currentProfile = profiles.find((profile) => profile.entity === result.entity);
 				const saved = yield* effectFromZenMoneyPromise(() =>

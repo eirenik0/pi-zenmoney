@@ -20,6 +20,10 @@ export type ZenMoneyHubResult =
 			entity: string;
 			selectors: string[];
 			snapshotPath: string;
+	  }
+	| {
+			kind: "delete";
+			entity: string;
 	  };
 
 interface ZenMoneyWorkingProfile {
@@ -472,6 +476,16 @@ export class ZenMoneyHubEditor {
 				this.cycleMode();
 				return;
 			}
+			if (matchesKey(data, "ctrl+d")) {
+				if (this.draftProfileEntity) return;
+				if (this.selectedProfileEntity === normalizeZenMoneyEntity("default")) {
+					this.errorMessage = "Cannot delete the default profile.";
+					this.refresh();
+					return;
+				}
+				this.done({ kind: "delete", entity: this.selectedProfileEntity });
+				return;
+			}
 			if (matchesKey(data, "escape")) {
 				if (this.clearSearchText("profiles")) return;
 				this.done(null);
@@ -757,7 +771,7 @@ export class ZenMoneyHubEditor {
 				panel(
 					this.theme.fg(
 						"dim",
-						" Profiles: type to filter • ↑↓ move • Enter accounts • Tab next • ctrl+a archived",
+						" Profiles: type to filter • ↑↓ move • Enter accounts • Tab next • ctrl+a archived • ctrl+d delete",
 					),
 				) +
 				border("│"),

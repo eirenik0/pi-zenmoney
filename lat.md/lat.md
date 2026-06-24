@@ -47,7 +47,7 @@ Resolves raw tokens and `op://` / `op read` secret references before any ZenMone
 
 Account selectors match id, title, company, syncID, or last digits. Snapshot exports can use `--entity` and `--snapshot-path`, and the path must stay relative to working files.
 
-The `/zenmoney` hub opens a TUI for browsing profiles and current accounts with separate live search filters; archived accounts are hidden by default but can be shown on demand, typing a new name can create a profile, space toggles the highlighted account, and enter saves the chosen selectors back to the profile policy.
+The `/zenmoney` hub opens a TUI for browsing profiles and current accounts with separate live search filters; archived accounts are hidden by default but can be shown on demand, typing a new name can create a profile, ctrl+d deletes non-default profiles, space toggles the highlighted account, and enter saves the chosen selectors back to the profile policy.
 
 The `/zenmoney` hub shows an inline balance summary for the currently selected entity and accounts, reusing the same selector and snapshot-path state.
 

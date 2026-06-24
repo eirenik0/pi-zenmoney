@@ -50,6 +50,10 @@ Saving from the editor should persist selected account ids to the chosen profile
 
 Ctrl+C and empty-search Escape should discard draft changes and leave the profile policy file unchanged.
 
+## Profile deletion
+
+Ctrl+D on a non-default profile should delete the entity directory and close the hub, while the default profile remains protected from deletion.
+
 ## Settings hub
 
 `/zenmoney` should open a single hub that exposes profile selection, account selection, snapshot-path setup, and balance reporting without forcing the user into separate commands.
