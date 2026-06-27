@@ -4,7 +4,7 @@ This repo packages a Pi extension for ZenMoney account discovery, transaction ex
 
 ## Repository overview
 
-`package.json` points Pi at the extension entrypoint, and the README documents install, token setup, and the supported ZenMoney command surface.
+`package.json` points Pi at the extension entrypoint, the README documents npm publication and install flow, and release notes live in `CHANGELOG.md`.
 
 - `/zenmoney` opens the settings hub for profiles, accounts, snapshot-path setup, and an inline balance summary.
 - `/zen-transactions` exports normalized transactions for chosen accounts.

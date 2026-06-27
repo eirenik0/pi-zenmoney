@@ -10,7 +10,13 @@ ZenMoney Pi package for account discovery, transaction export, and entity-scoped
 ## Install
 
 ```bash
-npm install
+npm install pi-zenmoney
+pi install pi-zenmoney
+```
+
+Local development:
+
+```bash
 pi install /absolute/path/to/this/repo
 ```
 
@@ -38,6 +44,10 @@ Optional:
 - `.pi/zenmoney/config.json` — optional workspace config for the active entity
 - `.pi/zenmoney/entities/<entity>/policy.json` — optional per-entity `selectors` and `snapshot_path` used by `/zenmoney`
 - `.pi/zenmoney/entities/<entity>/registry.json` — cached live snapshot for analysis on top of the registry
+
+## Release notes
+
+Release entries are tracked in `CHANGELOG.md`.
 
 ## ZenMoney API
 

@@ -1,14 +1,29 @@
 {
 	"name": "pi-zenmoney",
 	"version": "0.1.0",
-	"private": true,
 	"type": "module",
 	"description": "ZenMoney Pi extension for account discovery and register exports.",
+	"homepage": "https://github.com/eirenik0/pi-zenmoney#readme",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/eirenik0/pi-zenmoney.git"
+	},
+	"bugs": {
+		"url": "https://github.com/eirenik0/pi-zenmoney/issues"
+	},
+	"author": "Serhii Khalymon <serhii.khalymon@pm.me>",
+	"license": "MIT",
 	"keywords": [
 		"pi-package",
 		"pi-extension",
 		"zenmoney"
 	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"engines": {
+		"node": ">=24"
+	},
 	"pi": {
 		"extensions": [
 			"./src/index.ts"
@@ -17,6 +32,8 @@
 	"files": [
 		"src",
 		"README.md",
+		"CHANGELOG.md",
+		"LICENSE",
 		"package.json",
 		"biome.json"
 	],
@@ -25,6 +42,8 @@
 		"format": "biome format --write .",
 		"format:check": "biome format .",
 		"check": "biome check .",
+		"check:docs": "lat check",
+		"prepublishOnly": "npm run check",
 		"fix": "biome check --write ."
 	},
 	"dependencies": {
