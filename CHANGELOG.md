@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Draft npm publication metadata and release process.
+- Add GitHub Actions publishing for semver-tagged npm releases.
 
 ## 0.1.0 (2026-06-20)
 

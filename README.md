@@ -49,6 +49,12 @@ Optional:
 
 Release entries are tracked in `CHANGELOG.md`.
 
+## Publishing
+
+GitHub Actions publishes the package from semver tags like `v0.1.0`.
+The workflow expects an `NPM_TOKEN` secret and skips republishing versions
+that already exist on npm.
+
 ## ZenMoney API
 
 This extension is built on the official ZenMoney API:
