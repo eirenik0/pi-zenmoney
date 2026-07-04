@@ -4,7 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Add GitHub Actions publishing for semver-tagged npm releases.
+Pending changes will be listed here.
+
+## 0.1.1 (2026-06-20)
+
+- Restore the missing selector slug helper so `zenmoney_balance --store` can write snapshot files.
 
 ## 0.1.0 (2026-06-20)
 

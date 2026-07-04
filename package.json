@@ -1,6 +1,6 @@
 {
 	"name": "pi-zenmoney",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"type": "module",
 	"description": "ZenMoney Pi extension for account discovery and register exports.",
 	"homepage": "https://github.com/eirenik0/pi-zenmoney#readme",
