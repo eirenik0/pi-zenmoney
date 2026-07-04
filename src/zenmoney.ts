@@ -119,6 +119,15 @@ function normalizeDigits(value: string): string {
 	return value.replace(/\D+/g, "");
 }
 
+function makeSelectorSlug(selectors: string[]): string {
+	const normalized = selectors
+		.map((selector) => normalizeText(selector))
+		.join(" ")
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/(^-|-$)/g, "");
+	return normalized || "zenmoney-accounts";
+}
+
 function trimText(text: string, maxLines = 120, maxChars = 12000): string {
 	const lines = text.split("\n");
 	let trimmed = lines.slice(0, maxLines).join("\n");
