@@ -39,6 +39,10 @@ Implements the unified settings TUI for selecting profiles, selecting accounts, 
 
 Shared constants define preview sizing and source markers, while the types file models ZenMoney API payloads and the entity policy shape used by snapshots.
 
+### `src/network.ts` and `src/cancellable-operation.ts`
+
+Network helpers apply a deadline and abort signal to ZenMoney fetches and `op read`. Command loading uses that signal so Esc can cancel a stuck request without changing hub navigation.
+
 ### `src/secret-refs.ts`
 
 Resolves raw tokens and `op://` / `op read` secret references before any ZenMoney API request.
@@ -49,6 +53,6 @@ Account selectors match id, title, company, syncID, or last digits. Snapshot exp
 
 The `/zenmoney` hub opens a TUI for browsing profiles and current accounts with separate live search filters; archived accounts are hidden by default but can be shown on demand, typing a new name can create a profile, ctrl+d deletes non-default profiles, space toggles the highlighted account, and enter saves the chosen selectors back to the profile policy. GitHub Actions publishes semver-tagged npm releases using the checked-in changelog and package metadata without npm provenance, because npm only supports GitHub Actions provenance for public source repositories.
 
-The `/zenmoney` hub shows an inline balance summary for the currently selected entity and accounts, reusing the same selector and snapshot-path state.
+The `/zenmoney` hub shows an inline balance summary for the currently selected entity and accounts, reusing the same selector and snapshot-path state. Network lookups time out and a loading command can be cancelled with Esc.
 
 By default, snapshots still land under `.pi/zenmoney/entities/<entity>/snapshots/`, and selectors can fall back to entity policy or `ZENMONEY_SNAPSHOT_SELECTORS`.

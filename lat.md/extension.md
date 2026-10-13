@@ -11,3 +11,11 @@ The extension turns ZenMoney API data into selectable account listings, normaliz
 Transaction summaries now spell out the clear-spending rule: only rows classified as `outcome` are counted, while transfers and holds are excluded. A row becomes `transfer` only when ZenMoney reports both income and outcome amounts for the same transaction.
 
 Key code paths: [[src/zenmoney.ts#registerZenMoneyExtension]], [[src/hub.ts#ZenMoneyHubEditor]], [[src/zenmoney.ts#readZenMoneyTransactions]], [[src/zenmoney.ts#readZenMoneyBalanceSnapshot]], [[src/zenmoney.ts#storeZenMoneyBalanceSnapshot]].
+
+## Network timeouts and cancellation
+
+ZenMoney API calls and 1Password `op read` lookups time out, and Esc cancels a command while it is still loading.
+
+The default limit is 30 seconds (`ZENMONEY_NETWORK_TIMEOUT_MS`). `/zenmoney` and `/zen-transactions` show a cancellable loader whose signal is combined with the command abort signal; tool calls use the same deadline and the agent abort signal. Esc inside the hub still clears search text or steps back. Cancelled requests are not retried.
+
+Key code paths: [[src/network.ts#withNetworkDeadline]], [[src/network.ts#runAbortableCommand]], [[src/zenmoney.ts#runVisibleNetworkOperation]].

@@ -43,6 +43,7 @@
 		"format:check": "biome format .",
 		"check": "biome check .",
 		"check:docs": "lat check",
+		"test": "node --test test/*.test.ts",
 		"prepublishOnly": "npm run check",
 		"fix": "biome check --write ."
 	},
