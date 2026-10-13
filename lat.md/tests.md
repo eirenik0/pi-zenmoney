@@ -101,3 +101,7 @@ A request that completes before the deadline returns its value unchanged.
 ## Escape cancels loading
 
 Escape aborts the loading operation, clears the busy flag, and allows a later request to run.
+
+## Command signal during loading
+
+Aborting the command signal while the TUI loader is visible cancels the in-flight request even when Esc was not pressed.

@@ -7,7 +7,11 @@ import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Data, Effect } from "effect";
 import { Type } from "typebox";
 
-import { createExclusiveOperation, finishCancellableWork } from "./cancellable-operation.ts";
+import {
+	createExclusiveOperation,
+	finishCancellableWork,
+	linkAbortSignals,
+} from "./cancellable-operation.ts";
 import { PREVIEW_LINES } from "./constants.ts";
 import { ZenMoneyHubEditor, type ZenMoneyHubResult } from "./hub.ts";
 import {
@@ -79,6 +83,7 @@ async function runVisibleNetworkOperation<T>(
 			{ status: "ok"; value: T } | { status: "cancelled" } | { status: "error"; error: unknown }
 		>((tui, theme, _kb, done) => {
 			const loader = new BorderedLoader(tui, theme, message);
+			const linked = linkAbortSignals([loader.signal, ctx.signal]);
 			let settled = false;
 			const finish = (
 				result:
@@ -88,10 +93,11 @@ async function runVisibleNetworkOperation<T>(
 			) => {
 				if (settled) return;
 				settled = true;
+				linked.dispose();
 				done(result);
 			};
 			loader.onAbort = () => finish({ status: "cancelled" });
-			finishCancellableWork(loader.signal, (signal) => work(signal)).then(finish);
+			finishCancellableWork(linked.signal, (signal) => work(signal)).then(finish);
 			return loader;
 		});
 

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { CancellableLoader } from "@earendil-works/pi-tui";
 
-import { createExclusiveOperation, finishCancellableWork } from "../src/cancellable-operation.ts";
+import {
+	createExclusiveOperation,
+	finishCancellableWork,
+	linkAbortSignals,
+} from "../src/cancellable-operation.ts";
 
 function fakeTui() {
 	return { requestRender() {} };
@@ -46,6 +50,25 @@ describe("escape cancellation", () => {
 		const second = await gate.run(async () => "next");
 		assert.equal(second, "next");
 		assert.equal(gate.busy, false);
+	});
+
+	// @lat: [[tests#Command signal during loading]]
+	test("aborting the command signal cancels loader work without pressing Esc", async () => {
+		const command = new AbortController();
+		const loader = new AbortController();
+		const linked = linkAbortSignals([loader.signal, command.signal]);
+		const pending = finishCancellableWork(linked.signal, (signal) => {
+			return new Promise<string>((_resolve, reject) => {
+				signal.addEventListener("abort", () => {
+					reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+				});
+			});
+		});
+
+		command.abort();
+		assert.deepEqual(await pending, { status: "cancelled" });
+		assert.equal(loader.signal.aborted, false);
+		linked.dispose();
 	});
 
 	test("a second request is rejected while one is already busy", async () => {

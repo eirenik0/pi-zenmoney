@@ -16,6 +16,6 @@ Key code paths: [[src/zenmoney.ts#registerZenMoneyExtension]], [[src/hub.ts#ZenM
 
 ZenMoney API calls and 1Password `op read` lookups time out, and Esc cancels a command while it is still loading.
 
-The default limit is 30 seconds (`ZENMONEY_NETWORK_TIMEOUT_MS`). `/zenmoney` and `/zen-transactions` show a cancellable loader; tool calls use the same deadline and the agent abort signal. Esc inside the hub still clears search text or steps back. Cancelled requests are not retried.
+The default limit is 30 seconds (`ZENMONEY_NETWORK_TIMEOUT_MS`). `/zenmoney` and `/zen-transactions` show a cancellable loader whose signal is combined with the command abort signal; tool calls use the same deadline and the agent abort signal. Esc inside the hub still clears search text or steps back. Cancelled requests are not retried.
 
 Key code paths: [[src/network.ts#withNetworkDeadline]], [[src/network.ts#runAbortableCommand]], [[src/zenmoney.ts#runVisibleNetworkOperation]].
