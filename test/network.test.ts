@@ -116,6 +116,7 @@ describe("network deadlines", () => {
 		assert.deepEqual(value, { accounts: 2 });
 	});
 
+	// @lat: [[tests#Network timeout override]]
 	test("invalid timeout overrides fall back to the default", () => {
 		assert.equal(networkTimeoutMs({}), 30_000);
 		assert.equal(networkTimeoutMs({ ZENMONEY_NETWORK_TIMEOUT_MS: "15000" }), 15_000);
@@ -125,6 +126,7 @@ describe("network deadlines", () => {
 });
 
 describe("secret references", () => {
+	// @lat: [[tests#1Password lookup timeout]]
 	test("1Password lookup times out without treating it as a generic CLI failure", async () => {
 		await assert.rejects(
 			() =>
@@ -140,6 +142,7 @@ describe("secret references", () => {
 		);
 	});
 
+	// @lat: [[tests#1Password lookup success]]
 	test("1Password lookup returns the resolved secret", async () => {
 		const secret = await resolveSecretReference("op://vault/item", "ZenMoney token", {
 			timeoutMs: 200,
@@ -148,6 +151,7 @@ describe("secret references", () => {
 		assert.equal(secret, "token");
 	});
 
+	// @lat: [[tests#Raw token resolution]]
 	test("raw tokens skip the 1Password command", async () => {
 		let calls = 0;
 		const secret = await resolveSecretReference("plain-token", "ZenMoney token", {

@@ -105,3 +105,23 @@ Escape aborts the loading operation, clears the busy flag, and allows a later re
 ## Command signal during loading
 
 Aborting the command signal while the TUI loader is visible cancels the in-flight request even when Esc was not pressed.
+
+## Busy network operation
+
+A second ZenMoney request is rejected while another cancellable operation is still running, and the first operation can still finish.
+
+## Network timeout override
+
+`ZENMONEY_NETWORK_TIMEOUT_MS` sets the deadline, while missing or invalid values fall back to 30 seconds.
+
+## 1Password lookup timeout
+
+A hanging `op read` fails as a 1Password timeout instead of a generic CLI authentication error.
+
+## 1Password lookup success
+
+A resolved 1Password reference returns the trimmed secret value.
+
+## Raw token resolution
+
+A raw ZenMoney token is used as-is and does not spawn `op read`.

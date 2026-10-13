@@ -71,6 +71,7 @@ describe("escape cancellation", () => {
 		linked.dispose();
 	});
 
+	// @lat: [[tests#Busy network operation]]
 	test("a second request is rejected while one is already busy", async () => {
 		const gate = createExclusiveOperation();
 		let release: (() => void) | undefined;
