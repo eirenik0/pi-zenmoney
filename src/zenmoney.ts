@@ -15,6 +15,7 @@ import {
 import { PREVIEW_LINES } from "./constants.ts";
 import { ZenMoneyHubEditor, type ZenMoneyHubResult } from "./hub.ts";
 import {
+	clampTimeoutMs,
 	isZenMoneyCancelled,
 	networkTimeoutMs,
 	withNetworkDeadline,
@@ -256,7 +257,7 @@ async function fetchZenMoneySnapshot(
 		return snapshotCache.snapshot;
 	}
 
-	const timeoutMs = options?.timeoutMs ?? networkTimeoutMs();
+	const timeoutMs = clampTimeoutMs(options?.timeoutMs ?? networkTimeoutMs());
 	const payload = await withNetworkDeadline(
 		{
 			signal: options?.signal,

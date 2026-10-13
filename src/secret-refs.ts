@@ -2,6 +2,7 @@ import { Data } from "effect";
 
 import {
 	type CommandExec,
+	clampTimeoutMs,
 	isZenMoneyCancelled,
 	isZenMoneyTimeout,
 	networkTimeoutMs,
@@ -74,7 +75,7 @@ export async function resolveSecretReference(
 	if (!reference) return rawValue;
 
 	try {
-		const timeoutMs = options?.timeoutMs ?? networkTimeoutMs();
+		const timeoutMs = clampTimeoutMs(options?.timeoutMs ?? networkTimeoutMs());
 		const { stdout } = await runAbortableCommand("op", ["read", reference], {
 			signal: options?.signal,
 			timeoutMs,

@@ -40,7 +40,7 @@ Optional:
 - `ZENMONEY_API_BASE_URL`
 - `ZENMONEY_SNAPSHOT_SELECTORS` — fallback selectors for balance workflows when none are passed
 - `ZENMONEY_SNAPSHOT_PATH` — fallback relative snapshot folder, resolved in the working files folder
-- `ZENMONEY_NETWORK_TIMEOUT_MS` — request deadline in milliseconds (default `30000`)
+- `ZENMONEY_NETWORK_TIMEOUT_MS` — request deadline in milliseconds (default `30000`, capped at `2147483647`)
 
 `/zenmoney` and `/zen-transactions` show a loader while they talk to ZenMoney or 1Password. Press Esc to cancel that request. Inside the settings hub, Esc still clears the current field or steps back.
 - `.pi/zenmoney/config.json` — workspace config for the active entity

@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 
-import { DEFAULT_NETWORK_TIMEOUT_MS } from "./constants.ts";
+import { DEFAULT_NETWORK_TIMEOUT_MS, MAX_NETWORK_TIMEOUT_MS } from "./constants.ts";
 
 const execFile = promisify(execFileCallback);
 
@@ -27,12 +27,17 @@ export function isZenMoneyCancelled(error: unknown): error is ZenMoneyCancelledE
 	);
 }
 
+export function clampTimeoutMs(timeoutMs: number): number {
+	if (!Number.isFinite(timeoutMs) || !Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+		return DEFAULT_NETWORK_TIMEOUT_MS;
+	}
+	return Math.min(timeoutMs, MAX_NETWORK_TIMEOUT_MS);
+}
+
 export function networkTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
 	const raw = env.ZENMONEY_NETWORK_TIMEOUT_MS?.trim();
 	if (!raw) return DEFAULT_NETWORK_TIMEOUT_MS;
-	const value = Number(raw);
-	if (!Number.isInteger(value) || value <= 0) return DEFAULT_NETWORK_TIMEOUT_MS;
-	return value;
+	return clampTimeoutMs(Number(raw));
 }
 
 export function formatTimeout(timeoutMs: number): string {
@@ -137,7 +142,7 @@ export async function withNetworkDeadline<T>(
 	options: NetworkDeadlineOptions,
 	fn: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-	const timeoutMs = options.timeoutMs ?? networkTimeoutMs();
+	const timeoutMs = clampTimeoutMs(options.timeoutMs ?? networkTimeoutMs());
 	const timeoutMessage = options.timeoutMessage ?? zenMoneyTimeoutMessage(timeoutMs);
 	const cancelledMessage = options.cancelledMessage ?? ZENMONEY_CANCELLED_MESSAGE;
 	const abort = createNetworkAbort({

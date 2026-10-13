@@ -118,6 +118,10 @@ A second ZenMoney request is rejected while another cancellable operation is sti
 
 `ZENMONEY_NETWORK_TIMEOUT_MS` sets the deadline, while missing or invalid values fall back to 30 seconds.
 
+## Network timeout upper bound
+
+Timeouts above Node's maximum delay are capped at 2147483647 ms so they cannot collapse to 1 ms.
+
 ## 1Password lookup timeout
 
 A hanging `op read` fails as a 1Password timeout instead of a generic CLI authentication error.

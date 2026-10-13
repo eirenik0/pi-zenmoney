@@ -158,6 +158,19 @@ describe("network deadlines", () => {
 		assert.equal(networkTimeoutMs({ ZENMONEY_NETWORK_TIMEOUT_MS: "0" }), 30_000);
 		assert.equal(networkTimeoutMs({ ZENMONEY_NETWORK_TIMEOUT_MS: "nope" }), 30_000);
 	});
+
+	// @lat: [[tests#Network timeout upper bound]]
+	test("timeouts above Node's maximum delay stay above 1ms", async () => {
+		assert.equal(networkTimeoutMs({ ZENMONEY_NETWORK_TIMEOUT_MS: "2147483648" }), 2_147_483_647);
+		const value = await withNetworkDeadline(
+			{ timeoutMs: 2_147_483_648, timeoutMessage: "timed out" },
+			async () => {
+				await new Promise((resolve) => setTimeout(resolve, 15));
+				return "ok";
+			},
+		);
+		assert.equal(value, "ok");
+	});
 });
 
 describe("secret references", () => {
