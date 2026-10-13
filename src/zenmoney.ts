@@ -24,6 +24,7 @@ import {
 	zenMoneyTimeoutMessage,
 } from "./network.ts";
 import { resolveSecretReference } from "./secret-refs.ts";
+import { cachedZenMoneySnapshot } from "./snapshot-cache.ts";
 import type {
 	BankTransactionRow,
 	CurrencyTotals,
@@ -249,13 +250,11 @@ async function fetchZenMoneySnapshot(
 	const token = await getZenMoneyToken(options);
 	if (!token) throw new Error(zenMoneySetupHint());
 
-	if (
-		!force &&
-		snapshotCache?.token === token &&
-		Date.now() - snapshotCache.snapshot.fetchedAt < 60_000
-	) {
-		return snapshotCache.snapshot;
-	}
+	const cached = cachedZenMoneySnapshot(snapshotCache, token, Date.now(), {
+		force,
+		signal: options?.signal,
+	});
+	if (cached) return cached;
 
 	const timeoutMs = clampTimeoutMs(options?.timeoutMs ?? networkTimeoutMs());
 	const payload = await withNetworkDeadline(
@@ -853,6 +852,7 @@ async function readZenMoneyBalanceSnapshot(params: {
 		signal: params.signal,
 		timeoutMs: params.timeoutMs,
 	});
+	if (params.signal?.aborted) throw new ZenMoneyCancelledError(ZENMONEY_CANCELLED_MESSAGE);
 	await writeZenMoneyRegistry(cwd, entity, result.snapshot);
 	const balancesByCurrencyMap = result.accounts.reduce((map, entry) => {
 		const value = entry.account.balance;
@@ -1169,6 +1169,7 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 				period: params.period,
 				signal,
 			});
+			if (signal?.aborted) throw new ZenMoneyCancelledError(ZENMONEY_CANCELLED_MESSAGE);
 
 			let saved: { jsonPath: string; csvPath: string } | undefined;
 			if (params.store) {

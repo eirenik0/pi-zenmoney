@@ -90,6 +90,10 @@ Aborting the caller signal rejects the in-flight request as cancelled and does n
 
 An already aborted caller does not start the network operation, and no rejection is left unhandled.
 
+## Cancelled snapshot cache
+
+An aborted caller does not receive a cached ZenMoney snapshot, so a cancelled balance request does not continue into registry or snapshot writes.
+
 ## Nested abort propagation
 
 A parent abort cancels the child network deadline, including a nested 1Password command started with that signal.
