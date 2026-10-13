@@ -86,6 +86,10 @@ A ZenMoney network call that never settles fails with a timeout instead of leavi
 
 Aborting the caller signal rejects the in-flight request as cancelled and does not start another attempt.
 
+## Already aborted request
+
+An already aborted caller does not start the network operation, and no rejection is left unhandled.
+
 ## Nested abort propagation
 
 A parent abort cancels the child network deadline, including a nested 1Password command started with that signal.

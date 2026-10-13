@@ -95,15 +95,21 @@ function createNetworkAbort(options: {
 	};
 }
 
+function abortReason(signal: AbortSignal): unknown {
+	return signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+}
+
 function raceSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 	if (signal.aborted) {
-		return Promise.reject(
-			signal.reason ?? new DOMException("The operation was aborted.", "AbortError"),
+		promise.then(
+			() => undefined,
+			() => undefined,
 		);
+		return Promise.reject(abortReason(signal));
 	}
 	return new Promise<T>((resolve, reject) => {
 		const onAbort = () => {
-			reject(signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+			reject(abortReason(signal));
 		};
 		signal.addEventListener("abort", onAbort, { once: true });
 		promise.then(
@@ -141,6 +147,7 @@ export async function withNetworkDeadline<T>(
 		cancelledMessage,
 	});
 	try {
+		if (abort.signal.aborted) throw abortReason(abort.signal);
 		return await raceSignal(fn(abort.signal), abort.signal);
 	} catch (error) {
 		if (abort.reason() === "timeout") throw new ZenMoneyTimeoutError(timeoutMessage);

@@ -68,6 +68,41 @@ describe("network deadlines", () => {
 		assert.equal(calls, 1);
 	});
 
+	// @lat: [[tests#Already aborted request]]
+	test("an already aborted caller does not start the request", async () => {
+		const parent = new AbortController();
+		parent.abort();
+		const unhandled: unknown[] = [];
+		const onUnhandled = (error: unknown) => {
+			unhandled.push(error);
+		};
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			let calls = 0;
+			await assert.rejects(
+				() =>
+					withNetworkDeadline(
+						{
+							signal: parent.signal,
+							timeoutMs: 5_000,
+							timeoutMessage: "timed out",
+							cancelledMessage: ZENMONEY_CANCELLED_MESSAGE,
+						},
+						async () => {
+							calls += 1;
+							return Promise.reject(new Error("should not start"));
+						},
+					),
+				isZenMoneyCancelled,
+			);
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			assert.equal(calls, 0);
+			assert.deepEqual(unhandled, []);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+	});
+
 	// @lat: [[tests#Nested abort propagation]]
 	test("a parent abort cancels a nested command signal", async () => {
 		const parent = new AbortController();
