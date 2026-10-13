@@ -1,14 +1,23 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { BorderedLoader, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import type { Theme } from "@earendil-works/pi-tui";
 import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Data, Effect } from "effect";
 import { Type } from "typebox";
 
+import { createExclusiveOperation, finishCancellableWork } from "./cancellable-operation.ts";
 import { PREVIEW_LINES } from "./constants.ts";
 import { ZenMoneyHubEditor, type ZenMoneyHubResult } from "./hub.ts";
+import {
+	isZenMoneyCancelled,
+	networkTimeoutMs,
+	withNetworkDeadline,
+	ZENMONEY_CANCELLED_MESSAGE,
+	ZenMoneyCancelledError,
+	zenMoneyTimeoutMessage,
+} from "./network.ts";
 import { resolveSecretReference } from "./secret-refs.ts";
 import type {
 	BankTransactionRow,
@@ -39,21 +48,60 @@ import {
 
 class ZenMoneyCommandError extends Data.TaggedError("ZenMoneyCommandError")<{
 	message: string;
+	cancelled?: boolean;
 }> {}
 
 function toZenMoneyCommandError(error: unknown): ZenMoneyCommandError {
 	return new ZenMoneyCommandError({
 		message: error instanceof Error ? error.message : String(error),
+		cancelled: isZenMoneyCancelled(error),
 	});
 }
 
-type CommandContext = {
-	cwd: string;
+type CommandContext = Pick<ExtensionCommandContext, "cwd" | "mode" | "signal" | "ui">;
+
+type ZenMoneyCallOptions = {
 	signal?: AbortSignal;
-	ui: {
-		notify(message: string, level: string): void;
-	};
+	timeoutMs?: number;
 };
+
+const zenMoneyOperation = createExclusiveOperation();
+
+async function runVisibleNetworkOperation<T>(
+	ctx: CommandContext,
+	message: string,
+	work: (signal: AbortSignal | undefined) => Promise<T>,
+): Promise<T> {
+	return zenMoneyOperation.run(async () => {
+		if (ctx.mode !== "tui") return work(ctx.signal);
+
+		const outcome = await ctx.ui.custom<
+			{ status: "ok"; value: T } | { status: "cancelled" } | { status: "error"; error: unknown }
+		>((tui, theme, _kb, done) => {
+			const loader = new BorderedLoader(tui, theme, message);
+			let settled = false;
+			const finish = (
+				result:
+					| { status: "ok"; value: T }
+					| { status: "cancelled" }
+					| { status: "error"; error: unknown },
+			) => {
+				if (settled) return;
+				settled = true;
+				done(result);
+			};
+			loader.onAbort = () => finish({ status: "cancelled" });
+			finishCancellableWork(loader.signal, (signal) => work(signal)).then(finish);
+			return loader;
+		});
+
+		if (outcome.status === "cancelled") {
+			throw new ZenMoneyCancelledError(ZENMONEY_CANCELLED_MESSAGE);
+		}
+		if (outcome.status === "error") throw outcome.error;
+		return outcome.value;
+	});
+}
 
 interface ZenMoneyWorkingProfile {
 	entity: string;
@@ -68,7 +116,7 @@ function runZenMoneyBoundary(
 	return Effect.runPromise(
 		Effect.catchAll(effect, (error) =>
 			Effect.sync(() => {
-				ctx.ui.notify(error.message, "error");
+				ctx.ui.notify(error.message, error.cancelled ? "info" : "error");
 			}),
 		),
 	);
@@ -174,10 +222,10 @@ function zenMoneySetupHint(): string {
 	].join("\n");
 }
 
-async function getZenMoneyToken(): Promise<string | undefined> {
+async function getZenMoneyToken(options?: ZenMoneyCallOptions): Promise<string | undefined> {
 	const raw = process.env.ZENMONEY_TOKEN?.trim();
 	if (!raw) return undefined;
-	return resolveSecretReference(raw, "ZenMoney token");
+	return resolveSecretReference(raw, "ZenMoney token", options);
 }
 
 function getZenMoneyBaseUrl(): string {
@@ -187,8 +235,11 @@ function getZenMoneyBaseUrl(): string {
 	);
 }
 
-async function fetchZenMoneySnapshot(force = false): Promise<ZenMoneySnapshot> {
-	const token = await getZenMoneyToken();
+async function fetchZenMoneySnapshot(
+	force = false,
+	options?: ZenMoneyCallOptions,
+): Promise<ZenMoneySnapshot> {
+	const token = await getZenMoneyToken(options);
 	if (!token) throw new Error(zenMoneySetupHint());
 
 	if (
@@ -199,29 +250,41 @@ async function fetchZenMoneySnapshot(force = false): Promise<ZenMoneySnapshot> {
 		return snapshotCache.snapshot;
 	}
 
-	const response = await fetch(`${getZenMoneyBaseUrl()}/v8/diff/`, {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${token}`,
-			"Content-Type": "application/json",
-			Accept: "application/json",
+	const timeoutMs = options?.timeoutMs ?? networkTimeoutMs();
+	const payload = await withNetworkDeadline(
+		{
+			signal: options?.signal,
+			timeoutMs,
+			timeoutMessage: zenMoneyTimeoutMessage(timeoutMs),
+			cancelledMessage: ZENMONEY_CANCELLED_MESSAGE,
 		},
-		body: JSON.stringify({
-			currentClientTimestamp: Math.floor(Date.now() / 1000),
-			serverTimestamp: 0,
-		}),
-	});
+		async (signal) => {
+			const response = await fetch(`${getZenMoneyBaseUrl()}/v8/diff/`, {
+				method: "POST",
+				signal,
+				headers: {
+					Authorization: `Bearer ${token}`,
+					"Content-Type": "application/json",
+					Accept: "application/json",
+				},
+				body: JSON.stringify({
+					currentClientTimestamp: Math.floor(Date.now() / 1000),
+					serverTimestamp: 0,
+				}),
+			});
 
-	if (!response.ok) {
-		const body = await response.text();
-		throw new Error(
-			`ZenMoney API request failed (${response.status} ${response.statusText}). ${body.slice(0, 300)}`.trim(),
-		);
-	}
+			if (!response.ok) {
+				const body = await response.text();
+				throw new Error(
+					`ZenMoney API request failed (${response.status} ${response.statusText}). ${body.slice(0, 300)}`.trim(),
+				);
+			}
 
-	const payload = (await response.json()) as Partial<ZenMoneySnapshot> & {
-		serverTimestamp?: number;
-	};
+			return (await response.json()) as Partial<ZenMoneySnapshot> & {
+				serverTimestamp?: number;
+			};
+		},
+	);
 	const snapshot: ZenMoneySnapshot = {
 		fetchedAt: Date.now(),
 		serverTimestamp: payload.serverTimestamp ?? 0,
@@ -724,6 +787,7 @@ function buildZenMoneyBalanceSummary(params: {
 async function readZenMoneyTransactions(
 	selectors: string[],
 	period?: string,
+	options?: ZenMoneyCallOptions,
 ): Promise<{
 	summary: string;
 	csv: string;
@@ -737,7 +801,7 @@ async function readZenMoneyTransactions(
 		throw new Error(`Invalid period \`${period}\`. Expected format: YYYY-MM.`);
 	}
 
-	const snapshot = await fetchZenMoneySnapshot();
+	const snapshot = await fetchZenMoneySnapshot(false, options);
 	const accounts = resolveSelectedAccounts(snapshot, selectors);
 	let rows = normalizeTransactionRows(snapshot, accounts);
 	if (normalizedPeriod) rows = rows.filter((row) => row.date.startsWith(normalizedPeriod));
@@ -761,6 +825,8 @@ async function readZenMoneyBalanceSnapshot(params: {
 	entity?: string;
 	selectors?: string[];
 	period?: string;
+	signal?: AbortSignal;
+	timeoutMs?: number;
 }): Promise<{
 	entity: string;
 	summary: string;
@@ -776,7 +842,10 @@ async function readZenMoneyBalanceSnapshot(params: {
 	const entity = await resolveZenMoneyActiveEntity(cwd, params.entity);
 	const policy = await readZenMoneyEntityPolicy(cwd, entity);
 	const selectors = resolveZenMoneySnapshotSelectors(params.selectors ?? [], policy, entity);
-	const result = await readZenMoneyTransactions(selectors, params.period);
+	const result = await readZenMoneyTransactions(selectors, params.period, {
+		signal: params.signal,
+		timeoutMs: params.timeoutMs,
+	});
 	await writeZenMoneyRegistry(cwd, entity, result.snapshot);
 	const balancesByCurrencyMap = result.accounts.reduce((map, entry) => {
 		const value = entry.account.balance;
@@ -923,7 +992,11 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 		runZenMoneyBoundary(
 			ctx,
 			Effect.gen(function* () {
-				const snapshot = yield* effectFromZenMoneyPromise(() => fetchZenMoneySnapshot());
+				const snapshot = yield* effectFromZenMoneyPromise(() =>
+					runVisibleNetworkOperation(ctx, "Loading ZenMoney accounts…", (signal) =>
+						fetchZenMoneySnapshot(false, { signal }),
+					),
+				);
 				const accounts = listSelectableAccounts(snapshot, undefined, false);
 				const allAccounts = listSelectableAccounts(snapshot, undefined, true);
 				const profiles = yield* effectFromZenMoneyPromise(() =>
@@ -981,11 +1054,14 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 
 				if (result.kind === "balance") {
 					const balance = yield* effectFromZenMoneyPromise(() =>
-						readZenMoneyBalanceSnapshot({
-							cwd: ctx.cwd,
-							entity: result.entity,
-							selectors: result.selectors,
-						}),
+						runVisibleNetworkOperation(ctx, "Loading ZenMoney balance…", (signal) =>
+							readZenMoneyBalanceSnapshot({
+								cwd: ctx.cwd,
+								entity: result.entity,
+								selectors: result.selectors,
+								signal,
+							}),
+						),
 					);
 					yield* Effect.sync(() => {
 						sendZenMoneyReport(pi, `ZenMoney balance ${result.entity}`, balance.summary);
@@ -1027,7 +1103,9 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 				ctx,
 				Effect.gen(function* () {
 					const result = yield* effectFromZenMoneyPromise(() =>
-						readZenMoneyTransactions(selectors, period),
+						runVisibleNetworkOperation(ctx, "Loading ZenMoney transactions…", (signal) =>
+							readZenMoneyTransactions(selectors, period, { signal }),
+						),
 					);
 					yield* Effect.sync(() => {
 						sendZenMoneyReport(
@@ -1076,11 +1154,13 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 				snapshotPath?: string;
 				store?: boolean;
 			},
+			signal: AbortSignal | undefined,
 		) {
 			const result = await readZenMoneyBalanceSnapshot({
 				entity: params.entity,
 				selectors: params.selectors,
 				period: params.period,
+				signal,
 			});
 
 			let saved: { jsonPath: string; csvPath: string } | undefined;
@@ -1169,12 +1249,16 @@ export default function registerZenMoneyExtension(pi: ExtensionAPI) {
 			),
 			period: Type.Optional(Type.String({ description: "Optional month filter such as 2026-03" })),
 		}),
-		async execute(_id: string, params: { entity?: string; selectors?: string[]; period?: string }) {
+		async execute(
+			_id: string,
+			params: { entity?: string; selectors?: string[]; period?: string },
+			signal: AbortSignal | undefined,
+		) {
 			const cwd = process.cwd();
 			const entity = await resolveZenMoneyActiveEntity(cwd, params.entity);
 			const policy = await readZenMoneyEntityPolicy(cwd, entity);
 			const selectors = resolveZenMoneySnapshotSelectors(params.selectors ?? [], policy, entity);
-			const result = await readZenMoneyTransactions(selectors, params.period);
+			const result = await readZenMoneyTransactions(selectors, params.period, { signal });
 			return {
 				content: [{ type: "text", text: trimText(result.summary, 120, 12000) }],
 				details: {

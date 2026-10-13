@@ -77,3 +77,27 @@ Editing the hub's snapshot path should preserve relative-path validation and fal
 ## Profile enter flow
 
 Enter or Return should move from profiles into accounts or create a new draft profile when the search text does not match an existing entity, then save selected account ids from the account pane.
+
+## Network request timeout
+
+A ZenMoney network call that never settles fails with a timeout instead of leaving the command waiting, and it is not retried.
+
+## Network request cancellation
+
+Aborting the caller signal rejects the in-flight request as cancelled and does not start another attempt.
+
+## Nested abort propagation
+
+A parent abort cancels the child network deadline, including a nested 1Password command started with that signal.
+
+## Network abort cleanup
+
+Finishing a request clears its timer and parent listener so a later abort does not trip the completed call.
+
+## Network request success
+
+A request that completes before the deadline returns its value unchanged.
+
+## Escape cancels loading
+
+Escape aborts the loading operation, clears the busy flag, and allows a later request to run.

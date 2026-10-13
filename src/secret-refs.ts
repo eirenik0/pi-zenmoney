@@ -1,9 +1,14 @@
-import { execFile as execFileCallback } from "node:child_process";
-import { promisify } from "node:util";
+import { Data } from "effect";
 
-import { Data, Effect } from "effect";
-
-const execFile = promisify(execFileCallback);
+import {
+	type CommandExec,
+	isZenMoneyCancelled,
+	isZenMoneyTimeout,
+	networkTimeoutMs,
+	onePasswordTimeoutMessage,
+	runAbortableCommand,
+	ZENMONEY_CANCELLED_MESSAGE,
+} from "./network.ts";
 
 function trimMatchingQuotes(value: string): string {
 	if (
@@ -54,28 +59,44 @@ function toSecretReferenceError(
 	});
 }
 
-function resolveSecretReferenceEffect(rawValue: string, label = "secret") {
+export type SecretReferenceOptions = {
+	signal?: AbortSignal;
+	timeoutMs?: number;
+	execImpl?: CommandExec;
+};
+
+export async function resolveSecretReference(
+	rawValue: string,
+	label = "secret",
+	options?: SecretReferenceOptions,
+): Promise<string> {
 	const reference = extractOnePasswordReference(rawValue);
-	if (!reference) return Effect.succeed(rawValue);
+	if (!reference) return rawValue;
 
-	return Effect.tryPromise({
-		try: () => execFile("op", ["read", reference]),
-		catch: (error) => toSecretReferenceError(label, reference, error),
-	}).pipe(
-		Effect.flatMap(({ stdout }) => {
-			const secret = stdout.trim();
-			if (!secret) {
-				return Effect.fail(
-					new SecretReferenceError({
-						message: `1Password reference ${reference} resolved to an empty value.`,
-					}),
-				);
-			}
-			return Effect.succeed(secret);
-		}),
-	);
-}
-
-export async function resolveSecretReference(rawValue: string, label = "secret"): Promise<string> {
-	return Effect.runPromise(resolveSecretReferenceEffect(rawValue, label));
+	try {
+		const timeoutMs = options?.timeoutMs ?? networkTimeoutMs();
+		const { stdout } = await runAbortableCommand("op", ["read", reference], {
+			signal: options?.signal,
+			timeoutMs,
+			timeoutMessage: onePasswordTimeoutMessage(timeoutMs),
+			cancelledMessage: ZENMONEY_CANCELLED_MESSAGE,
+			execImpl: options?.execImpl,
+		});
+		const secret = stdout.trim();
+		if (!secret) {
+			throw new SecretReferenceError({
+				message: `1Password reference ${reference} resolved to an empty value.`,
+			});
+		}
+		return secret;
+	} catch (error) {
+		if (
+			isZenMoneyCancelled(error) ||
+			isZenMoneyTimeout(error) ||
+			error instanceof SecretReferenceError
+		) {
+			throw error;
+		}
+		throw toSecretReferenceError(label, reference, error);
+	}
 }

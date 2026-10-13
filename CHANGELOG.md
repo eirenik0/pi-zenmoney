@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-Pending changes will be listed here.
+- Time out ZenMoney API and 1Password lookups, and cancel a loading command with Esc.
 
 ## 0.1.1 (2026-06-20)
 
