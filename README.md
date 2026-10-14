@@ -53,8 +53,8 @@ Release entries are tracked in `CHANGELOG.md`.
 
 ## Publishing
 
-GitHub Actions publishes the package from semver tags like `v0.1.1`.
-The workflow expects an `NPM_TOKEN` secret and skips versions that already exist on npm.
+GitHub Actions publishes the package from semver tags like `v0.2.0`.
+The workflow authenticates with GitHub OIDC trusted publishing (`id-token: write` in `publish-npm.yml`); npm attaches provenance automatically, and no `NPM_TOKEN` secret is required. The package's trusted publisher on npmjs.com must name this repository and workflow file `publish-npm.yml`. Versions that already exist on npm are skipped.
 
 ## ZenMoney API
 
